@@ -1,6 +1,7 @@
 package events
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -98,5 +99,58 @@ func TestPersisterReceivesEveryEvent(t *testing.T) {
 	}
 	if persisted[0].Data["port"] != 3000 {
 		t.Fatalf("event data was not preserved: %+v", persisted[0].Data)
+	}
+}
+
+// TestPublishDuringCloseDoesNotPanic is a regression test for a crash seen under
+// load: Publish used to snapshot the subscriber channels, release the lock and
+// then send, so a health probe that landed while the daemon was shutting down
+// sent on a channel Close had already closed and took the process down.
+func TestPublishDuringCloseDoesNotPanic(t *testing.T) {
+	for attempt := 0; attempt < 50; attempt++ {
+		bus := New(nil)
+		for i := 0; i < 4; i++ {
+			// Unread subscribers with a tiny buffer, so sends are the interesting
+			// path rather than a no-op.
+			bus.Subscribe(1)
+		}
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 50; i++ {
+				bus.Emit(dto.EventHealthChanged, "p_1", "web", "health is HEALTHY", nil)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			bus.Close()
+		}()
+		wg.Wait()
+
+		// Publishing after Close must still be safe and must still be recorded.
+		event := bus.Emit(dto.EventServiceStopped, "p_1", "web", "stopped", nil)
+		if event.Seq == 0 {
+			t.Fatal("an event published after Close must still be stamped")
+		}
+	}
+}
+
+// TestSubscribeAfterCloseEndsImmediately keeps a late subscriber from waiting
+// forever for a bus that will never publish to it again.
+func TestSubscribeAfterCloseEndsImmediately(t *testing.T) {
+	bus := New(nil)
+	bus.Close()
+
+	stream, cancel := bus.Subscribe(4)
+	defer cancel()
+	select {
+	case _, ok := <-stream:
+		if ok {
+			t.Fatal("a subscriber created after Close must not receive events")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("a subscriber created after Close must get a closed channel")
 	}
 }

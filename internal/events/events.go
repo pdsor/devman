@@ -25,6 +25,7 @@ type Bus struct {
 	seq      uint64
 	recent   []dto.Event
 	capacity int
+	closed   bool
 }
 
 // New creates a bus. persist may be nil.
@@ -40,6 +41,12 @@ func New(persist Persister) *Bus {
 //
 // Delivery never blocks: a subscriber that stops reading loses events rather
 // than stalling the supervisor that is trying to report a state change.
+//
+// The fan-out happens while the lock is held. That is safe precisely because
+// every send is non-blocking, and it is necessary: releasing the lock and then
+// sending to a snapshot of the channels races with Close, and a health probe
+// that lands during shutdown would send on a closed channel and take the daemon
+// down with it.
 func (b *Bus) Publish(event dto.Event) dto.Event {
 	b.mu.Lock()
 	b.seq++
@@ -51,21 +58,21 @@ func (b *Bus) Publish(event dto.Event) dto.Event {
 	if len(b.recent) > b.capacity {
 		b.recent = b.recent[len(b.recent)-b.capacity:]
 	}
-	targets := make([]chan dto.Event, 0, len(b.subs))
-	for _, ch := range b.subs {
-		targets = append(targets, ch)
+	if !b.closed {
+		for _, ch := range b.subs {
+			select {
+			case ch <- event:
+			default:
+			}
+		}
 	}
 	persist := b.persist
 	b.mu.Unlock()
 
+	// Persistence runs outside the lock: it touches SQLite, and a slow write
+	// must not serialise state changes elsewhere in the daemon.
 	if persist != nil {
 		persist(event)
-	}
-	for _, ch := range targets {
-		select {
-		case ch <- event:
-		default:
-		}
 	}
 	return event
 }
@@ -88,9 +95,15 @@ func (b *Bus) Subscribe(buffer int) (<-chan dto.Event, func()) {
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	ch := make(chan dto.Event, buffer)
+	if b.closed {
+		// A subscriber that arrives during shutdown gets a closed channel, so it
+		// ends its loop instead of waiting for events that will never come.
+		close(ch)
+		return ch, func() {}
+	}
 	id := b.nextID
 	b.nextID++
-	ch := make(chan dto.Event, buffer)
 	b.subs[id] = ch
 	return ch, func() {
 		b.mu.Lock()
@@ -115,9 +128,14 @@ func (b *Bus) Recent(limit int) []dto.Event {
 }
 
 // Close disconnects every subscriber.
+//
+// Publishing after Close is not an error: a state change may still be discovered
+// while the daemon shuts down, and it is recorded and persisted. It simply has
+// nobody left to deliver to.
 func (b *Bus) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.closed = true
 	for id, ch := range b.subs {
 		delete(b.subs, id)
 		close(ch)

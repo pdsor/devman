@@ -286,9 +286,79 @@ chronological order afterwards, `shutdown` stops the service process, an invalid
 settings edit is refused rather than persisted, and a stale `daemon.json` is
 cleaned up.
 
+## M8 — CLI and acceptance suites — done
+
+`internal/cli` plus the three-line `cmd/devman/main.go` complete the core. The
+CLI is a presentation layer: every piece of state it prints comes from a DTO the
+daemon returned, so `--json` is the contract and the tables are a rendering of
+it. Nothing in DevMan parses terminal text to discover state, which is what lets
+the GUI and the Codex skill behave identically later without reimplementing
+anything.
+
+- `init`, `validate`, `paths` and `version` run locally on purpose. A user asking
+  where the data lives is often asking precisely because the daemon will not
+  start. Everything else auto-starts the daemon, so a user never has to know it
+  exists; `daemon status` and `daemon stop` deliberately do **not** auto-start,
+  because a status command that starts what it reports on can never tell you it
+  was stopped.
+- `register` prints project, location, per-service runtime, command line, shell,
+  cwd, `env_file` and compose target, then asks for confirmation. With `--json`
+  and no `--trust` it prints the same preview and refuses with
+  `PROJECT_UNTRUSTED`: a non-interactive caller must never be prompted and must
+  never have trust granted implicitly on its behalf.
+- Flags are accepted after positional arguments. Go's `flag` package stops at the
+  first non-flag argument, so `devman logs backend --follow` would have silently
+  ignored `--follow`; arguments are permuted before parsing, with `--` preserved
+  so a positional that begins with a dash still survives.
+- `start`/`stop`/`restart` always route through the project endpoint even when
+  named services are given, because dependency ordering is a project-level fact:
+  starting `backend` may require starting `database` first, and only the daemon
+  knows that. Per-service failures are printed under the table and produce a
+  non-zero exit without hiding the services that did come up.
+- `--wait` polls until every affected service is healthy or terminal. A RUNNING
+  but not yet healthy service is explicitly *not* settled, because a dev server's
+  first probe usually fails and returning then would report a working service as
+  broken.
+- Status output annotates what changes its meaning rather than burying it:
+  `(adopted)`, `(no log capture)`, `×N` restarts, and a `?` on a port the service
+  never bound. `logs` warns before printing nothing when a service was adopted
+  and its output is no longer captured.
+- `init` emits only canonical spellings — `ports:` as a list, no `port:` sugar,
+  `platform.<os>.command` for per-OS differences — and never invents a health
+  probe, since the scaffold is the example most users copy from.
+
+**Acceptance suites** (`internal/acceptance`) drive the real CLI against a real
+daemon over the real HTTP API; the only concessions to a test environment are a
+temporary data directory and a private daemon port range.
+
+1. *Full chain*: registering without approval is refused; `register --trust` →
+   `start --wait` brings up backend and frontend in dependency order, both
+   RUNNING and HEALTHY with ports observed BOUND and a URL; `status --json`,
+   `logs`, `restart` (new PIDs) and `stop` all work; every process in the tree is
+   gone afterwards and every reservation released.
+2. *Concurrency*: two projects that both prefer 3000 both start, on 3000 and
+   3001, and neither `devman.yaml` is modified — DevMan resolves conflicts at
+   runtime, it does not rewrite a user's file.
+3. *Crash recovery*: a service that outlives its daemon is adopted by the next
+   one with the same PID, reported RUNNING with `log_capture: detached` and its
+   port still accounted for; restarting replaces the process and restores
+   capture. On Windows the job object normally takes the tree down with the
+   daemon, so the suite skips rather than pretends when there is no survivor.
+
+Running everything in parallel surfaced one real bug, now fixed with a
+regression test: `events.Bus.Publish` snapshotted its subscriber channels,
+released the lock and then sent, so a health probe landing during shutdown could
+send on a channel `Close` had just closed and crash the daemon. The fan-out now
+happens under the lock, which is safe because every send is non-blocking, and
+publishing after `Close` is recorded rather than delivered. Each test package
+also got its own port window, since `go test ./...` runs packages concurrently
+against separate databases and two suites sharing the default range would be
+handed the same free port.
+
 ## Next
 
-- M8 CLI
+- M9 GUI, M10 Codex skill, M11 packaging, M12 CI (deferred by decision)
+- Python/FastAPI fixtures before V0.1 ships
 
 
 

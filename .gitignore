@@ -1,8 +1,9 @@
 # Go build artefacts
 /bin/
 /dist/
-devman
-devman.exe
+# Anchored: an unanchored `devman` would also ignore cmd/devman/.
+/devman
+/devman.exe
 *.test
 *.exe
 *.out

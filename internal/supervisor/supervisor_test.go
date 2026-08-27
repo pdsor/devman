@@ -141,6 +141,11 @@ func newHarness(t *testing.T, yaml string) *harness {
 	current.Defaults.GracefulTimeout = *config.NewDuration(3 * time.Second)
 	current.Defaults.RestartDelay = *config.NewDuration(20 * time.Millisecond)
 	current.Defaults.RestartMaxDelay = *config.NewDuration(40 * time.Millisecond)
+	// A private port window for this package: `go test ./...` runs packages in
+	// parallel with separate databases, so two suites sharing the default range
+	// would both be handed the same free port and one fixture would fail to
+	// listen.
+	current.PortRanges[settings.RangeGeneral] = settings.PortRange{Start: 22000, End: 22199}
 
 	reg := registry.New(db)
 	record, err := reg.Register(root, true)

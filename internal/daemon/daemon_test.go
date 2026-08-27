@@ -124,6 +124,9 @@ func newHarness(t *testing.T) *harness {
 	// A narrow window of its own keeps the test off a real daemon's ports.
 	current.Daemon.PortStart = 39500
 	current.Daemon.PortEnd = 39549
+	// Service ports get a private window too, so this package cannot be handed
+	// the same free port as another package running in parallel.
+	current.PortRanges[settings.RangeGeneral] = settings.PortRange{Start: 22200, End: 22399}
 
 	db, err := storage.Open(layout.Database)
 	if err != nil {
