@@ -129,9 +129,90 @@ because that pattern is exactly how concurrent starts end up sharing a port.
   macOS shells out to `lsof` when present. An unknown owner is a warning, never
   a blocked start.
 
+## M6 — Environment, health, runtimes, supervisor — done
+
+This milestone turns the pieces into something that actually runs services.
+
+**`internal/envresolve`** implements the environment precedence chain: daemon
+environment → `env_file` in declaration order → `service.env` →
+`platform.<os>.env` → DevMan injection. Injection wins on purpose: declaring
+`ports: [{value: auto, env: PORT}]` states that DevMan owns that variable, so a
+stale `PORT` in `.env` must not override the allocated one. `${ENV:NAME}` sees
+the user layers only, never injection, which keeps the chain acyclic — a
+template can never depend on a value that has not been allocated yet. The
+resolver also handles the reduced PATH a GUI-launched daemon inherits, and the
+absolute path it resolves is runtime state that is never written back into
+`devman.yaml`.
+
+**`internal/health`** keeps health strictly separate from process state: a
+service can be RUNNING and UNHEALTHY, and that distinction is the point. Every
+probe gates on "is the process alive" first, so a stale listener on the same
+port cannot report a false success. An undeclared `health:` block means
+`process`, reported as `N/A` — DevMan never infers a tcp or http probe from the
+presence of ports.
+
+**`internal/events`** is the structured event bus, in place from the moment the
+supervisor exists rather than retrofitted when SSE arrives. Fan-out never
+blocks: a subscriber that stops reading loses events instead of stalling the
+service state change that is trying to be reported.
+
+**`internal/runtime`** hides *how* a service executes behind one interface, so
+the supervisor has no host-versus-Docker branching:
+
+- `HostRuntime` spawns through the M2 platform layer, so the whole process tree
+  stays contained. `shell: true` hands the line to `cmd.exe /D /S /C`,
+  `pwsh -NoProfile -Command` or `/bin/sh -c` verbatim — splitting a shell line
+  ourselves would silently change what quotes and pipes mean.
+- `ComposeRuntime` calls `docker compose up -d <service>` and then follows the
+  container's logs as a tracked process, which is also how liveness is observed.
+  A missing Docker is `DOCKER_NOT_FOUND` → BLOCKED, not FAILED.
+- `ExternalRuntime` starts and stops nothing. It exists so a service someone
+  else launched can be listed, health checked and depended upon; terminating a
+  process DevMan does not own is exactly the surprise a process manager must
+  never produce. Its declared ports are *adopted* rather than reserved, because
+  something is already listening on them.
+
+**`internal/supervisor`** is the state machine:
+
+- Desired state is written to SQLite *before* anything is spawned or signalled.
+  A restart policy acts only while the desired state is RUNNING, so `devman
+  stop` can never lose a race with an automatic restart, and a daemon crash
+  mid-stop cannot resurrect a service.
+- Every instance carries a generation. A stop bumps it before terminating, so
+  the exit it causes is reported as a stop and never mistaken for a crash.
+- A start resolves everything before creating a process: env layering,
+  `required_env` gating, port reservation, template expansion, executable
+  lookup, health spec. A missing prerequisite is BLOCKED (nothing is broken:
+  install Docker, set the variable, free the port); a genuine failure is FAILED.
+  Either way the ports reserved during a failed preparation are released.
+- Restart backoff is exponential with a cap and up to 20% jitter, so dependent
+  services do not retry in lockstep when a database comes back. A service that
+  stayed up for a minute has its restart budget reset, and `max_attempts` ends
+  in FAILED without rewriting the desired state.
+- `depends_on` is honoured through `TopoOrder`, which also pulls in transitive
+  dependencies — starting `backend` starts the database it declares, or the
+  start is a lie. `condition: healthy` waits for a real probe; a probe-less
+  dependency satisfies it immediately.
+- A project start does not abort on the first failure: a broken worker must not
+  stop the frontend from coming up. Services that depend on the failure are
+  reported as `DEPENDENCY_FAILED` rather than launched into a broken
+  environment. Stopping runs in reverse dependency order.
+- Every state change is published as an event and annotated into the service's
+  own log, so the reason a service stopped sits next to the output that preceded
+  it.
+
+Verified on Windows with the test binary as its own fixture: port injection
+reaching the process and the allocation observed as BOUND, http health becoming
+HEALTHY, a graceful stop preserving the service's own exit code and releasing
+every reservation, an explicit stop never counting as a crash under
+`restart: always`, `on-failure` retrying exactly `max_attempts` times and then
+reporting FAILED, missing `required_env` and a missing executable blocking
+without spawning or leaking ports, a dependent service waiting for its
+dependency's health, and a service that ignores its injected port staying
+RUNNING while its allocation is marked UNVERIFIED.
+
 ## Next
 
-- M6 health, dependencies, restart policy
 - M7 daemon API and events
 - M8 CLI
 

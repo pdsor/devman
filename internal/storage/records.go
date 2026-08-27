@@ -387,7 +387,7 @@ func (db *DB) Instances(projectID, service string, limit int) ([]InstanceRecord,
 		       started_at, stopped_at, exit_code, restart_count
 		FROM process_instances
 		WHERE project_id = ? AND service_name = ?
-		ORDER BY started_at DESC LIMIT ?`, projectID, service, limit)
+		ORDER BY started_at DESC, rowid DESC LIMIT ?`, projectID, service, limit)
 	if err != nil {
 		return nil, errs.Wrap(errs.CodeInternal, err, "cannot list process instances")
 	}
