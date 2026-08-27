@@ -146,16 +146,16 @@ func TestPythonService(t *testing.T) {
 	root := writePythonProject(t, pythonYAML, stdlibApp, "app.py", interpreter)
 
 	var project dto.Project
-	s.runJSON(&project, "register", "--trust", root)
+	s.RunJSON(&project, "register", "--trust", root)
 
 	var started dto.OperationResult
-	s.runJSON(&started, "start", "--project", root, "--wait", "30s")
+	s.RunJSON(&started, "start", "--project", root, "--wait", "30s")
 	if len(started.Errors) != 0 {
 		t.Fatalf("start reported errors: %+v", started.Errors)
 	}
 
 	var status dto.Project
-	s.runJSON(&status, "status", "--project", root)
+	s.RunJSON(&status, "status", "--project", root)
 	api := serviceByName(t, status.Services, "api")
 	if api.Status != dto.StatusRunning {
 		t.Fatalf("api is %s (%s)", api.Status, api.Message)
@@ -177,7 +177,7 @@ func TestPythonService(t *testing.T) {
 	// PYTHONUNBUFFERED were not honoured it would sit in CPython's stdout buffer
 	// for as long as the service runs.
 	waitFor(t, "the interpreter's unbuffered output to be captured", 15*time.Second, func() bool {
-		app, stdout, _ := s.app(false)
+		app, stdout, _ := s.App(false)
 		if code := app.Run([]string{"logs", "api", "--project", root, "--tail", "50"}); code != 0 {
 			return false
 		}
@@ -186,7 +186,7 @@ func TestPythonService(t *testing.T) {
 
 	pid := api.PID
 	var stopped dto.OperationResult
-	s.runJSON(&stopped, "stop", "--project", root)
+	s.RunJSON(&stopped, "stop", "--project", root)
 	if len(stopped.Errors) != 0 {
 		t.Fatalf("stop reported errors: %+v", stopped.Errors)
 	}
@@ -198,7 +198,7 @@ func TestPythonService(t *testing.T) {
 	})
 
 	var allocations []dto.PortAllocation
-	s.runJSON(&allocations, "ports")
+	s.RunJSON(&allocations, "ports")
 	if len(allocations) != 0 {
 		t.Fatalf("stopping must release every reservation, %d left: %+v",
 			len(allocations), allocations)
@@ -255,16 +255,16 @@ func TestFastAPIService(t *testing.T) {
 	root := writePythonProject(t, fastapiYAML, fastapiApp, "app.py", interpreter)
 
 	var project dto.Project
-	s.runJSON(&project, "register", "--trust", root)
+	s.RunJSON(&project, "register", "--trust", root)
 
 	var started dto.OperationResult
-	s.runJSON(&started, "start", "--project", root, "--wait", "60s")
+	s.RunJSON(&started, "start", "--project", root, "--wait", "60s")
 	if len(started.Errors) != 0 {
 		t.Fatalf("start reported errors: %+v", started.Errors)
 	}
 
 	var status dto.Project
-	s.runJSON(&status, "status", "--project", root)
+	s.RunJSON(&status, "status", "--project", root)
 	api := serviceByName(t, status.Services, "api")
 	if api.Status != dto.StatusRunning {
 		t.Fatalf("api is %s (%s)", api.Status, api.Message)
@@ -279,7 +279,7 @@ func TestFastAPIService(t *testing.T) {
 	// Uvicorn announces itself on stderr, so this also asserts that both streams
 	// are captured rather than only stdout.
 	waitFor(t, "uvicorn's startup banner to be captured", 20*time.Second, func() bool {
-		app, stdout, _ := s.app(false)
+		app, stdout, _ := s.App(false)
 		if code := app.Run([]string{"logs", "api", "--project", root, "--tail", "100"}); code != 0 {
 			return false
 		}
@@ -288,7 +288,7 @@ func TestFastAPIService(t *testing.T) {
 
 	pid := api.PID
 	var stopped dto.OperationResult
-	s.runJSON(&stopped, "stop", "--project", root)
+	s.RunJSON(&stopped, "stop", "--project", root)
 	if len(stopped.Errors) != 0 {
 		t.Fatalf("stop reported errors: %+v", stopped.Errors)
 	}

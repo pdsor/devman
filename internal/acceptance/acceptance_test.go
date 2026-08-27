@@ -1,274 +1,55 @@
 // Package acceptance holds the end-to-end suites for DevMan V0.1.
 //
-// Every other test package checks one component. These three check the promises
-// DevMan makes to a user: that the whole chain works, that two projects wanting
-// the same port both start without editing a file, and that a daemon restart
-// leaves the machine in an honest state.
+// Every other test package checks one component. These check the promises DevMan
+// makes to a user: that the whole chain works, that two projects wanting the
+// same port both start without editing a file, that a daemon restart leaves the
+// machine in an honest state, and that a Python service behaves like one.
 //
 // The suites drive the real CLI against a real daemon over the real HTTP API.
-// Nothing is stubbed: the only concession to a test environment is a temporary
-// data directory and a private daemon port range.
+// Nothing is stubbed: the only concessions to a test environment are a temporary
+// data directory and a private daemon port window. The daemon itself is built by
+// internal/testenv, which is shared with the integration suites so there is only
+// one definition of "a real DevMan" to keep honest.
 package acceptance
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/devman-project/devman/internal/cli"
-	"github.com/devman-project/devman/internal/daemon"
-	"github.com/devman-project/devman/internal/events"
-	"github.com/devman-project/devman/internal/logstore"
 	"github.com/devman-project/devman/internal/paths"
 	"github.com/devman-project/devman/internal/platform"
-	"github.com/devman-project/devman/internal/portmgr"
-	"github.com/devman-project/devman/internal/registry"
-	devrun "github.com/devman-project/devman/internal/runtime"
-	"github.com/devman-project/devman/internal/settings"
-	"github.com/devman-project/devman/internal/storage"
-	"github.com/devman-project/devman/internal/supervisor"
-	"github.com/devman-project/devman/pkg/config"
+	"github.com/devman-project/devman/internal/testenv"
 	"github.com/devman-project/devman/pkg/dto"
 )
 
-// The test binary doubles as the service fixture, so the suites need no external
-// runtime (node, python) to exercise a real process with a real listening port.
-const helperEnv = "DEVMAN_TEST_HELPER"
+// This package's private daemon port window. Every suite gets its own because
+// `go test ./...` runs packages in parallel, and because a suite must never bind
+// the port a developer's real daemon is on.
+var window = testenv.PortWindow{Start: 39600, End: 39649}
 
-func TestMain(m *testing.M) {
-	switch os.Getenv(helperEnv) {
-	case "":
-		// Without a console DevMan cannot deliver CTRL_BREAK on Windows and every
-		// stop degrades to a force kill, which would make the graceful path
-		// untestable.
-		_ = platform.EnsureConsole()
-		os.Exit(m.Run())
-	case "listen":
-		serveUntilSignal()
-	default:
-		fmt.Fprintln(os.Stderr, "unknown helper mode")
-		os.Exit(2)
-	}
+// TestMain also serves the fixture: with DEVMAN_TEST_HELPER set, this binary is
+// the service under supervision, so the suites need no external runtime.
+func TestMain(m *testing.M) { testenv.RunMain(m) }
+
+func newStack(t *testing.T, layout paths.Layout) *testenv.Stack {
+	return testenv.NewStack(t, layout, window)
 }
 
-// serveUntilSignal is the fixture service: it binds the port DevMan injected,
-// answers /health, and exits 0 on a graceful signal.
-func serveUntilSignal() {
-	port := os.Getenv("PORT")
-	listener, err := net.Listen("tcp", "127.0.0.1:"+port)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "cannot listen:", err)
-		os.Exit(1)
-	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	go func() { _ = http.Serve(listener, mux) }()
-	fmt.Fprintln(os.Stdout, "listening on "+port)
-
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	select {
-	case <-ch:
-		os.Exit(0)
-	case <-time.After(120 * time.Second):
-		os.Exit(99)
-	}
-}
-
-// --- harness ---
-
-// stack is a complete daemon: storage, registry, ports, logs, events,
-// supervisor and HTTP server, wired exactly as internal/daemon.Run wires them.
-type stack struct {
-	t        *testing.T
-	layout   paths.Layout
-	settings *settings.Settings
-	db       *storage.DB
-	listener *daemon.Listener
-	server   *daemon.Server
-	sup      *supervisor.Supervisor
-	logs     *logstore.Manager
-	bus      *events.Bus
-	closed   bool
-}
-
-func newStack(t *testing.T, layout paths.Layout) *stack {
-	t.Helper()
-
-	current := settings.Default()
-	current.Defaults.HealthInterval = *config.NewDuration(100 * time.Millisecond)
-	current.Defaults.HealthTimeout = *config.NewDuration(time.Second)
-	current.Defaults.StartTimeout = *config.NewDuration(5 * time.Second)
-	current.Defaults.GracefulTimeout = *config.NewDuration(5 * time.Second)
-	// A private window keeps the suites off a developer's real daemon.
-	current.Daemon.PortStart = 39600
-	current.Daemon.PortEnd = 39649
-
-	db, err := storage.Open(layout.Database)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listener, err := daemon.Bind(layout, current, "acceptance")
-	if err != nil {
-		t.Fatal(err)
-	}
-	logs := logstore.NewManager(layout.Logs, logstore.DefaultOptions())
-	reg := registry.New(db)
-	ports := portmgr.New(db, current, nil)
-	bus := events.New(func(event dto.Event) {
-		_, _ = db.InsertEvent(storage.EventRecord{
-			Type:        string(event.Type),
-			ProjectID:   event.Project,
-			ServiceName: event.Service,
-			Message:     event.Message,
-			Data:        event.Data,
-			CreatedAt:   event.Timestamp,
-		})
-	})
-	sup := supervisor.New(supervisor.Deps{
-		DB: db, Registry: reg, Ports: ports, Logs: logs, Events: bus,
-		Runtimes: devrun.NewSet(),
-		Settings: func() *settings.Settings { return current },
-	})
-	server := daemon.NewServer(listener, daemon.Options{
-		Layout: layout, Settings: current, DB: db, Registry: reg, Ports: ports,
-		Logs: logs, Events: bus, Supervisor: sup, Version: "acceptance",
-	})
-	go func() { _ = server.Serve() }()
-
-	s := &stack{
-		t: t, layout: layout, settings: current, db: db,
-		listener: listener, server: server, sup: sup, logs: logs, bus: bus,
-	}
-	t.Cleanup(func() { s.close(true) })
-	return s
-}
-
-// close shuts the stack down. stopServices=false simulates a daemon that died
-// without cleaning up, which is what the crash recovery suite needs.
-func (s *stack) close(stopServices bool) {
-	if s.closed {
-		return
-	}
-	s.closed = true
-	if stopServices {
-		s.sup.StopAll()
-	}
-	s.sup.Close()
-	_ = s.server.GracefulShutdown()
-	s.logs.Close()
-	s.bus.Close()
-	_ = s.db.Close()
-}
-
-// app builds a CLI bound to this stack's data directory. The CLI discovers the
-// daemon the same way it does for a user: through daemon.json and the token
-// file in that directory.
-func (s *stack) app(jsonOutput bool) (*cli.App, *bytes.Buffer, *bytes.Buffer) {
-	var stdout, stderr bytes.Buffer
-	return &cli.App{
-		Version: "acceptance",
-		Layout:  s.layout,
-		Stdin:   strings.NewReader(""),
-		Stdout:  &stdout,
-		Stderr:  &stderr,
-		JSON:    jsonOutput,
-	}, &stdout, &stderr
-}
-
-// run executes one CLI command and fails the test if it exits non-zero.
-func (s *stack) run(args ...string) string {
-	s.t.Helper()
-	app, stdout, stderr := s.app(false)
-	if code := app.Run(args); code != 0 {
-		s.t.Fatalf("devman %s exited %d\nstdout:\n%s\nstderr:\n%s",
-			strings.Join(args, " "), code, stdout.String(), stderr.String())
-	}
-	return stdout.String()
-}
-
-// runJSON executes one CLI command with --json and decodes its output.
-func (s *stack) runJSON(out any, args ...string) {
-	s.t.Helper()
-	app, stdout, stderr := s.app(true)
-	if code := app.Run(args); code != 0 {
-		s.t.Fatalf("devman --json %s exited %d\nstdout:\n%s\nstderr:\n%s",
-			strings.Join(args, " "), code, stdout.String(), stderr.String())
-	}
-	if err := json.Unmarshal(stdout.Bytes(), out); err != nil {
-		s.t.Fatalf("devman --json %s did not produce JSON: %v\n%s",
-			strings.Join(args, " "), err, stdout.String())
-	}
-}
-
-// runExpectingFailure executes a command that must fail, returning its exit code
-// and the decoded error.
-func (s *stack) runExpectingFailure(args ...string) dto.Error {
-	s.t.Helper()
-	app, stdout, _ := s.app(true)
-	if code := app.Run(args); code == 0 {
-		s.t.Fatalf("devman --json %s was expected to fail\n%s",
-			strings.Join(args, " "), stdout.String())
-	}
-	// The JSON error object is the last line: a command may print a preview
-	// before refusing.
-	var payload struct {
-		Error dto.Error `json:"error"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
-	for {
-		var value json.RawMessage
-		if err := decoder.Decode(&value); err != nil {
-			break
-		}
-		var candidate struct {
-			Error *dto.Error `json:"error"`
-		}
-		if err := json.Unmarshal(value, &candidate); err == nil && candidate.Error != nil {
-			payload.Error = *candidate.Error
-		}
-	}
-	if payload.Error.Code == "" {
-		s.t.Fatalf("no machine readable error in:\n%s", stdout.String())
-	}
-	return payload.Error
-}
-
-func newLayout(t *testing.T) paths.Layout {
-	t.Helper()
-	layout := paths.For(t.TempDir())
-	if err := layout.EnsureDirs(); err != nil {
-		t.Fatal(err)
-	}
-	return layout
-}
-
-// writeProject writes a devman.yaml whose services are this test binary in
-// fixture mode.
-func writeProject(t *testing.T, template string) string {
-	t.Helper()
-	root := t.TempDir()
-	binary, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := strings.ReplaceAll(template, "%COMMAND%", filepath.ToSlash(binary))
-	if err := os.WriteFile(filepath.Join(root, "devman.yaml"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return root
-}
+// The suites read better with unqualified names, and these keep the diff between
+// what a test asserts and how it is set up small.
+var (
+	newLayout     = testenv.NewLayout
+	writeProject  = testenv.WriteProject
+	waitFor       = testenv.WaitFor
+	serviceByName = testenv.ServiceByName
+	singleService = testenv.SingleService
+	singlePort    = testenv.SinglePort
+	readConfig    = testenv.ReadConfig
+	free          = testenv.Free
+)
 
 const fullChainYAML = `version: 1
 
@@ -321,20 +102,20 @@ func TestFullChain(t *testing.T) {
 
 	// Registration is the trust boundary. Without an explicit approval a
 	// non-interactive caller must be refused rather than prompted.
-	refusal := s.runExpectingFailure("register", root)
+	refusal := s.RunExpectingFailure("register", root)
 	if refusal.Code != "PROJECT_UNTRUSTED" {
 		t.Fatalf("registering without approval must be refused, got %s: %s",
 			refusal.Code, refusal.Message)
 	}
 
 	var project dto.Project
-	s.runJSON(&project, "register", "--trust", root)
+	s.RunJSON(&project, "register", "--trust", root)
 	if project.ID == "" || !project.Trusted {
 		t.Fatalf("register did not return a trusted project: %+v", project)
 	}
 
 	var started dto.OperationResult
-	s.runJSON(&started, "start", "--project", root, "--wait", "20s")
+	s.RunJSON(&started, "start", "--project", root, "--wait", "20s")
 	if len(started.Errors) != 0 {
 		t.Fatalf("start reported errors: %+v", started.Errors)
 	}
@@ -343,7 +124,7 @@ func TestFullChain(t *testing.T) {
 	}
 
 	var status dto.Project
-	s.runJSON(&status, "status", "--project", root)
+	s.RunJSON(&status, "status", "--project", root)
 	if status.Status != dto.ProjectHealthy {
 		t.Fatalf("expected a HEALTHY project, got %s\n%+v", status.Status, status.Services)
 	}
@@ -383,13 +164,13 @@ func TestFullChain(t *testing.T) {
 		t.Fatal("the frontend started before the backend it depends on")
 	}
 
-	logs := s.run("logs", "backend", "--project", root, "--tail", "50")
+	logs := s.Run("logs", "backend", "--project", root, "--tail", "50")
 	if !strings.Contains(logs, "listening on") {
 		t.Fatalf("captured output is missing the service's own line:\n%s", logs)
 	}
 
 	var restarted dto.OperationResult
-	s.runJSON(&restarted, "restart", "--project", root, "--wait", "20s")
+	s.RunJSON(&restarted, "restart", "--project", root, "--wait", "20s")
 	if len(restarted.Errors) != 0 {
 		t.Fatalf("restart reported errors: %+v", restarted.Errors)
 	}
@@ -404,7 +185,7 @@ func TestFullChain(t *testing.T) {
 	}
 
 	var stopped dto.OperationResult
-	s.runJSON(&stopped, "stop", "--project", root)
+	s.RunJSON(&stopped, "stop", "--project", root)
 	if len(stopped.Errors) != 0 {
 		t.Fatalf("stop reported errors: %+v", stopped.Errors)
 	}
@@ -424,7 +205,7 @@ func TestFullChain(t *testing.T) {
 	}
 
 	var allocations []dto.PortAllocation
-	s.runJSON(&allocations, "ports")
+	s.RunJSON(&allocations, "ports")
 	if len(allocations) != 0 {
 		t.Fatalf("stopping must release every reservation, %d left: %+v",
 			len(allocations), allocations)
@@ -463,12 +244,12 @@ func TestTwoProjectsPreferringTheSamePort(t *testing.T) {
 	secondConfig := readConfig(t, secondRoot)
 
 	var registered dto.Project
-	s.runJSON(&registered, "register", "--trust", firstRoot)
-	s.runJSON(&registered, "register", "--trust", secondRoot)
+	s.RunJSON(&registered, "register", "--trust", firstRoot)
+	s.RunJSON(&registered, "register", "--trust", secondRoot)
 
 	var first, second dto.OperationResult
-	s.runJSON(&first, "start", "--project", firstRoot, "--wait", "20s")
-	s.runJSON(&second, "start", "--project", secondRoot, "--wait", "20s")
+	s.RunJSON(&first, "start", "--project", firstRoot, "--wait", "20s")
+	s.RunJSON(&second, "start", "--project", secondRoot, "--wait", "20s")
 
 	firstPort := singlePort(t, first, "web")
 	secondPort := singlePort(t, second, "web")
@@ -495,7 +276,7 @@ func TestTwoProjectsPreferringTheSamePort(t *testing.T) {
 
 	// Both allocations must be visible to anyone asking who holds what.
 	var usage dto.PortUsage
-	s.runJSON(&usage, "ports", fmt.Sprint(secondPort))
+	s.RunJSON(&usage, "ports", fmt.Sprint(secondPort))
 	if usage.Allocation == nil || usage.Allocation.Service != "web" {
 		t.Fatalf("ports %d did not name the owning service: %+v", secondPort, usage)
 	}
@@ -533,10 +314,10 @@ func TestCrashRecovery(t *testing.T) {
 	root := writeProject(t, survivorYAML)
 
 	var project dto.Project
-	first.runJSON(&project, "register", "--trust", root)
+	first.RunJSON(&project, "register", "--trust", root)
 
 	var started dto.OperationResult
-	first.runJSON(&started, "start", "--project", root, "--wait", "20s")
+	first.RunJSON(&started, "start", "--project", root, "--wait", "20s")
 	pid := singleService(t, started, "api").PID
 	if pid == 0 {
 		t.Fatal("the service reported no pid")
@@ -544,7 +325,7 @@ func TestCrashRecovery(t *testing.T) {
 
 	// Tear the daemon down without stopping anything: this is the daemon dying,
 	// not `devman daemon stop`.
-	first.close(false)
+	first.Close(false)
 
 	if !platform.Alive(pid) {
 		// On Windows a service tree normally dies with its daemon, because the
@@ -556,7 +337,7 @@ func TestCrashRecovery(t *testing.T) {
 	}
 
 	second := newStack(t, layout)
-	result, err := second.sup.Reconcile()
+	result, err := second.Supervisor().Reconcile()
 	if err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
@@ -565,7 +346,7 @@ func TestCrashRecovery(t *testing.T) {
 	}
 
 	var status dto.Project
-	second.runJSON(&status, "status", "--project", root)
+	second.RunJSON(&status, "status", "--project", root)
 	service := serviceByName(t, status.Services, "api")
 	if service.Status != dto.StatusRunning {
 		t.Fatalf("an adopted service must still be RUNNING, got %s", service.Status)
@@ -592,7 +373,7 @@ func TestCrashRecovery(t *testing.T) {
 	// Restarting is what restores full visibility, and the old process must be
 	// gone afterwards rather than left running alongside the new one.
 	var restarted dto.OperationResult
-	second.runJSON(&restarted, "restart", "--project", root, "--wait", "20s")
+	second.RunJSON(&restarted, "restart", "--project", root, "--wait", "20s")
 	fresh := singleService(t, restarted, "api")
 	if fresh.PID == pid {
 		t.Fatal("restart reused the adopted pid")
@@ -607,7 +388,7 @@ func TestCrashRecovery(t *testing.T) {
 		t.Fatalf("restarting must restore log capture, got %s", fresh.Observability.LogCapture)
 	}
 	waitFor(t, "output to be captured again", 10*time.Second, func() bool {
-		app, stdout, _ := second.app(false)
+		app, stdout, _ := second.App(false)
 		if code := app.Run([]string{"logs", "api", "--project", root, "--tail", "50"}); code != 0 {
 			return false
 		}
@@ -615,64 +396,3 @@ func TestCrashRecovery(t *testing.T) {
 	})
 }
 
-// --- helpers ---
-
-func serviceByName(t *testing.T, services []dto.Service, name string) dto.Service {
-	t.Helper()
-	for _, svc := range services {
-		if svc.Name == name {
-			return svc
-		}
-	}
-	t.Fatalf("no service named %q in %+v", name, services)
-	return dto.Service{}
-}
-
-func singleService(t *testing.T, result dto.OperationResult, name string) dto.Service {
-	t.Helper()
-	if len(result.Errors) != 0 {
-		t.Fatalf("operation reported errors: %+v", result.Errors)
-	}
-	return serviceByName(t, result.Services, name)
-}
-
-func singlePort(t *testing.T, result dto.OperationResult, name string) int {
-	t.Helper()
-	svc := singleService(t, result, name)
-	if len(svc.Ports) != 1 {
-		t.Fatalf("%s has %d ports, want 1", name, len(svc.Ports))
-	}
-	return svc.Ports[0].Port
-}
-
-func readConfig(t *testing.T, root string) string {
-	t.Helper()
-	body, err := os.ReadFile(filepath.Join(root, "devman.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(body)
-}
-
-// free reports whether a port can be bound right now, so an assertion about a
-// specific number can be skipped on a machine that is already using it.
-func free(port int) bool {
-	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return false
-	}
-	_ = listener.Close()
-	return true
-}
-
-func waitFor(t *testing.T, what string, timeout time.Duration, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
-}
