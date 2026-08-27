@@ -129,7 +129,13 @@ func (e *Error) HTTPStatus() int {
 		return http.StatusNotFound
 	case CodeProjectExists, CodeAlreadyRunning, CodeNotRunning, CodePortConflict:
 		return http.StatusConflict
-	case CodeProjectUntrusted, CodeUnauthorized:
+	case CodeUnauthorized:
+		// A missing or wrong credential, including a browser origin the daemon
+		// does not accept.
+		return http.StatusUnauthorized
+	case CodeProjectUntrusted:
+		// Authenticated, but the project's execution fingerprint has not been
+		// approved: the request is understood and deliberately refused.
 		return http.StatusForbidden
 	case CodeConfigInvalid, CodeInvalidRequest, CodeEnvMissing, CodeServiceBlocked:
 		return http.StatusBadRequest

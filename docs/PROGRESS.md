@@ -211,9 +211,83 @@ without spawning or leaking ports, a dependent service waiting for its
 dependency's health, and a service that ignores its injected port staying
 RUNNING while its allocation is marked UNVERIFIED.
 
+## M7 — Daemon API, events and reconciliation — done
+
+`internal/daemon` is the background service: an HTTP API on loopback plus the
+discovery, authentication and reconciliation around it. `internal/client` is the
+only way anything above it (CLI now, GUI and Codex skill later) reaches DevMan
+state, so the API contract and its error decoding exist in exactly one place.
+
+Discovery and credentials:
+
+- `daemon.json` holds `{pid, port, host, started_at, api_version, version,
+  graceful_signals}`. The auth token lives in a separate `auth-token` file with
+  0600 on Unix and a real user-only DACL on Windows, because Go's 0600 there
+  only toggles the read-only attribute. A test asserts the token never appears
+  in `daemon.json`.
+- A stale record is deleted rather than reported: liveness requires both that
+  the recorded PID exists *and* that something answers on the port, since PIDs
+  are reused.
+- The daemon port is found by actually binding across 39100–39149, so two
+  daemons can never agree on one port — the loser simply fails to bind. A second
+  daemon on a live record is refused with `ALREADY_RUNNING`.
+
+Security boundary:
+
+- Every request needs `Authorization: Bearer <token>`, compared in constant
+  time. The two SSE endpoints also accept `?token=`, because the browser
+  EventSource API cannot set headers; nothing else does.
+- Origin is validated with no permissive CORS anywhere: only loopback pages and
+  the Tauri shell are accepted, and a refused origin is never echoed back. A
+  page on the internet must not be able to drive a local daemon that can start
+  processes.
+- `UNAUTHORIZED` now maps to 401 (a credential problem) and `PROJECT_UNTRUSTED`
+  to 403 (understood and deliberately refused), which are different situations
+  and were previously the same status.
+
+API surface: daemon status and shutdown, paths, settings get/set, tool
+resolution, project list/register/inspect/resolve/trust/validate/unregister,
+project and service start/stop/restart, service status, log history and two
+*separate* SSE endpoints — `/events/stream` for the daemon and
+`/services/{name}/logs/stream` for one service, so a GUI watching one service's
+output does not have to filter the whole daemon's traffic. Events are persisted
+as they are published, so history survives a restart and a reconnecting client
+can catch up.
+
+Crash recovery, and a conflict that had to be resolved:
+
+- The plan asked for both a Windows Job Object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` (D20) and adoption of services that
+  outlive a daemon crash (D25). On Windows these are incompatible: the job dies
+  with the daemon and takes the tree with it. The ruling was to **keep
+  KILL_ON_JOB_CLOSE**, so Windows never leaves orphans and adoption is a Unix
+  path; Windows reconciliation records the process as gone and releases its
+  ports.
+- `devman daemon stop` therefore **stops every service first**. Shutdown calls
+  `Supervisor.StopAll`, which stops services in parallel so their graceful
+  timeouts do not add up. `Supervisor.Close` only tears down monitoring, keeping
+  "stop watching" and "stop the services" as separate decisions.
+- `Supervisor.Reconcile` runs before the API accepts traffic, so the first
+  status call reflects reality. A surviving process is adopted with
+  `status: RUNNING` plus `observability.log_capture: detached` — the pipes died
+  with the previous daemon, and saying so is more useful than inventing a new
+  status. Adoption re-checks the identity on every poll, so a recycled PID is
+  treated as an exit rather than silently supervising a stranger. A vanished
+  service is recorded as CRASHED when it was meant to be running, and is never
+  auto-started: reconciliation reports the truth, it does not make decisions the
+  user did not ask for.
+
+Verified end to end against a real listener: unauthenticated and wrong-token
+requests are refused, a foreign origin is refused while a loopback origin is
+echoed, the full service lifecycle works through the client (start → port and
+URL → healthy → captured logs → port usage names the owner → stop releases every
+reservation), events arrive on the SSE stream and are also queryable in
+chronological order afterwards, `shutdown` stops the service process, an invalid
+settings edit is refused rather than persisted, and a stale `daemon.json` is
+cleaned up.
+
 ## Next
 
-- M7 daemon API and events
 - M8 CLI
 
 

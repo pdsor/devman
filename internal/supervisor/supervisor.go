@@ -83,9 +83,12 @@ func New(deps Deps) *Supervisor {
 	}
 }
 
-// Close stops health monitoring and pending restart timers. Supervised
-// processes are left running: the daemon shutting down is not a reason to kill
-// a user's dev server, and reconciliation will adopt them on the next start.
+// Close stops health monitoring and pending restart timers.
+//
+// It does not terminate services: stopping them is a separate, explicit
+// decision that the daemon makes with StopAll before shutting down. Keeping the
+// two apart means a caller can tear down the supervisor without implying
+// anything about the processes it was watching.
 func (s *Supervisor) Close() {
 	s.cancel()
 	s.mu.Lock()

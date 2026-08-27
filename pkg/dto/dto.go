@@ -322,3 +322,17 @@ type OperationResult struct {
 	Services []Service `json:"services"`
 	Errors   []Error   `json:"errors,omitempty"`
 }
+
+// LogRecord is one captured line of service output.
+//
+// Logs are records rather than text: the stream, the timestamp and a stable
+// sequence number are part of the contract, so a consumer never has to parse a
+// prefix out of a line.
+type LogRecord struct {
+	Seq       uint64    `json:"seq"`
+	Timestamp time.Time `json:"timestamp"`
+	Project   string    `json:"project"`
+	Service   string    `json:"service"`
+	Stream    string    `json:"stream"`
+	Message   string    `json:"message"`
+}
