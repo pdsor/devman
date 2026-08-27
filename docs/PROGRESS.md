@@ -28,12 +28,40 @@ next one starts.
   named port ranges, log rotation, and defaults for graceful timeout, health
   and restart backoff. `daemon.host` is restricted to loopback.
 
+## M2 — Process supervisor and cross-platform process tree — done
+
+`internal/platform` owns spawning, signalling and killing.
+
+- Windows: every service gets a Job Object with
+  `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`, and the child is started
+  `CREATE_SUSPENDED` so it is inside the job before it can spawn anything.
+  Threads are then resumed explicitly. Stop sends `CTRL_BREAK` to the child's
+  own process group (`CREATE_NEW_PROCESS_GROUP`), waits, then calls
+  `TerminateJobObject`. The daemon calls `EnsureConsole` at startup because
+  `GenerateConsoleCtrlEvent` cannot reach a child without a console; console
+  detection uses `GetConsoleCP` since a ConPTY console has no window.
+- Unix: a new process group per service, `SIGTERM` then `SIGKILL` to `-pgid`.
+- Output goes through explicit `os.Pipe`s instead of `exec`'s copying
+  goroutines, so waiting for exit can never block on a detached grandchild that
+  inherited the pipe.
+- `Identity` (pid, spawn time, executable, command fingerprint) is recorded at
+  spawn time, not at reconciliation time, and `Inspect`/`MatchesIdentity`
+  reject recycled PIDs using process start time.
+- `StopOutcome` distinguishes a graceful exit from a force kill, including the
+  case where the graceful signal could not be delivered at all.
+
+Verified on Windows: streams stay separate, exit codes propagate, a graceful
+CTRL_BREAK shutdown returns the child's own exit code, a signal-ignoring
+process is force-killed, and stopping a service kills a grandchild that
+deliberately outlives its parent. Linux and macOS currently compile and vet
+clean; the same integration tests run on all three platforms in CI.
+
 ## Next
 
-- M2 process supervisor and cross-platform process tree
 - M3 log capture and status
 - M4 project registry on SQLite
 - M5 port manager
 - M6 health, dependencies, restart policy
 - M7 daemon API and events
 - M8 CLI
+
