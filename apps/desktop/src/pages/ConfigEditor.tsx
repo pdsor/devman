@@ -70,7 +70,9 @@ export function ConfigPage(props: { id: string }) {
     >
       {document.error ? <Notice tone="bad" title="Cannot read the configuration">{document.error}</Notice> : null}
 
-      {save.error && save.code !== "CONFIG_INVALID" ? (
+      {/* A YAML parse error arrives without structured findings, so the message
+          itself has to be shown or the refusal would be silent. */}
+      {save.error && !refused ? (
         <Notice tone="bad" title={save.code || "The save failed"}>{save.error}</Notice>
       ) : null}
 
