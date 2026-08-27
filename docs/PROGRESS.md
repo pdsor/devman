@@ -389,9 +389,62 @@ with no config, `query_status` with a valid config and no daemon, and
 `register` → `start` → `nothing` as the documented flow proceeds, with the
 service reaching RUNNING/HEALTHY on an auto-allocated port.
 
+## M9/M10 — desktop GUI — done
+
+`apps/desktop/` is a Tauri 2 shell (React 19 + Vite 8 + TypeScript) over the same
+HTTP API the CLI uses. The window holds no DevMan logic of its own: it renders
+`pkg/dto` and calls endpoints, so there is no second implementation of state to
+drift out of sync.
+
+Rust does only the two things a webview cannot: read the daemon's discovery file
+and token from disk (`daemon_endpoint`), and start the daemon detached when it is
+not running (`start_daemon`). `devman_paths` duplicates the Go layout rules
+deliberately — the alternative is asking a daemon that may be down where its own
+files are.
+
+The frontend layers are `src/api/` (types mirroring the DTOs, a fetch client that
+decodes the error envelope into an `ApiError` carrying the daemon's own code, and
+the Tauri bridge), `src/hooks.ts` for loading, and `src/pages/`.
+
+Refresh is driven by the event stream rather than by polling: one SSE connection
+feeds the whole window through `FeedContext`, and a page reloads when an event
+that concerns it arrives. Only uptime and port bindings — which have no event of
+their own — poll, and slowly. Loaded data is kept while a reload is in flight,
+because a dashboard that blanks on every event is unreadable exactly when it
+matters, while services are booting.
+
+Pages: Projects (cards with status, tally and quick start/stop), project detail
+(per-service state, health, ports, dependency order, capture warnings and
+start/stop/restart), Logs (live stream with stream and text filters), Ports
+(allocations plus a "who has this port" lookup that also answers for foreign
+processes), Activity (the raw event log merged with persisted history), Add a
+project (inspect → show exactly what would execute → approve), Configuration
+(edits the real `devman.yaml` through the new endpoints, with a refusal shown as
+inline findings), Environment (tools resolved in the daemon's own process, which
+is how a GUI launched with a reduced PATH gets diagnosed) and Settings.
+
+Two rules carry through the interface. Anything the daemon reports is set in mono
+and anything the interface says about itself is set in the display face, so
+machine truth and chrome never look alike. And colour is only ever a status — the
+palette *is* the status legend, not decoration. The signature element is a
+strip-chart of recent events per service: each tick is a real event, coloured by
+kind and as tall as it is significant, so a service that crashed and restarted
+twice looks different at a glance from one that has been quietly running.
+
+Trust is visible wherever it applies: an unapproved project cannot be started
+from the GUI either, the disabled control says why, and saving an edit that
+changes what a project executes reports that approval is needed again.
+
+Supporting daemon work in the same milestone: `GET`/`PUT /projects/{id}/config`
+serve and replace the project's actual configuration file. The PUT parses and
+validates before writing and writes atomically, so an invalid edit is refused
+with its findings and the file on disk is left exactly as it was.
+
+Verified with `go test ./...`, `tsc --noEmit`, `vite build`, and `cargo build`
+for the shell.
+
 ## Next
 
-- M9/M10 GUI: Tauri 2 desktop shell with the full page set
 - M12 packaging and CI
 - Python/FastAPI fixtures before V0.1 ships
 

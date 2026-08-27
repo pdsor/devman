@@ -3,11 +3,15 @@ package daemon
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/devman-project/devman/internal/envresolve"
 	"github.com/devman-project/devman/internal/logstore"
+	"github.com/devman-project/devman/pkg/config"
 	"github.com/devman-project/devman/pkg/dto"
 	"github.com/devman-project/devman/pkg/errs"
 )
@@ -244,6 +248,138 @@ type serviceSelection struct {
 	Services []string `json:"services,omitempty"`
 	Profile  string   `json:"profile,omitempty"`
 	All      bool     `json:"all,omitempty"`
+}
+
+// configDocument is the raw devman.yaml plus everything a caller needs to decide
+// whether it is safe to act on.
+type configDocument struct {
+	Path       string                   `json:"path"`
+	Content    string                   `json:"content"`
+	Validation *config.ValidationResult `json:"validation,omitempty"`
+	Trusted    bool                     `json:"trusted"`
+}
+
+// handleProjectConfigGet serves the configuration file as text.
+//
+// The GUI edits the same file a user edits by hand — there is no second
+// representation of a project's configuration, because two representations
+// eventually disagree.
+func (s *Server) handleProjectConfigGet(w http.ResponseWriter, r *http.Request) {
+	record, err := s.opts.Registry.Project(r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	data, readErr := os.ReadFile(record.ConfigPath)
+	if readErr != nil {
+		writeError(w, errs.Wrap(errs.CodeConfigNotFound, readErr,
+			"cannot read %s", record.ConfigPath))
+		return
+	}
+	document := configDocument{
+		Path:    record.ConfigPath,
+		Content: string(data),
+		Trusted: record.TrustedFingerprint != "",
+	}
+	if _, result, validateErr := s.opts.Registry.ConfigWithValidation(record.ID); result != nil || validateErr == nil {
+		document.Validation = result
+	}
+	writeJSON(w, http.StatusOK, document)
+}
+
+// handleProjectConfigSet validates a submitted document and only then writes it.
+//
+// Writing an invalid file would leave the project unstartable and the user
+// without the text they had before, so validation happens first and a rejected
+// document is returned with its errors rather than persisted.
+func (s *Server) handleProjectConfigSet(w http.ResponseWriter, r *http.Request) {
+	record, err := s.opts.Registry.Project(r.PathValue("id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var body struct {
+		Content string `json:"content"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, err)
+		return
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		writeError(w, errs.New(errs.CodeConfigInvalid, "the configuration is empty"))
+		return
+	}
+
+	cfg, parseErr := config.Parse([]byte(body.Content))
+	if parseErr != nil {
+		writeError(w, parseErr)
+		return
+	}
+	cfg.ConfigPath = record.ConfigPath
+	cfg.ProjectRoot = record.Path
+	result := cfg.Validate(config.DefaultValidateOptions())
+	if !result.Valid {
+		// Returned as the standard error envelope, not as a 400 with a different
+		// body shape: every client already knows how to read `error`, and the
+		// full findings ride along in details so an editor can show them inline.
+		failure := errs.New(errs.CodeConfigInvalid,
+			"%s", result.Errors[0].Message).With("validation", result)
+		if result.Errors[0].Path != "" {
+			failure = failure.At(result.Errors[0].Path)
+		}
+		writeError(w, failure)
+		return
+	}
+
+	if err := writeFileAtomic(record.ConfigPath, []byte(body.Content)); err != nil {
+		writeError(w, err)
+		return
+	}
+	// The registry re-reads on mtime change, so the next call sees the new file.
+	// Trust is re-evaluated from the fingerprint: an edit that changes what the
+	// project executes needs approval again, and the response says so rather
+	// than letting the next start fail unexplained.
+	updated, err := s.opts.Registry.Project(record.ID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	trusted := s.opts.Registry.EnsureTrusted(updated.ID) == nil
+	writeJSON(w, http.StatusOK, configDocument{
+		Path:       updated.ConfigPath,
+		Content:    body.Content,
+		Validation: result,
+		Trusted:    trusted,
+	})
+}
+
+// writeFileAtomic replaces a file without ever leaving a half-written one on
+// disk, which matters here because the file it replaces is executable
+// configuration.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, ".devman-config-*")
+	if err != nil {
+		return errs.Wrap(errs.CodeInternal, err, "cannot write next to %s", path)
+	}
+	name := temp.Name()
+	defer os.Remove(name)
+
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return errs.Wrap(errs.CodeInternal, err, "cannot write %s", name)
+	}
+	if err := temp.Sync(); err != nil {
+		temp.Close()
+		return errs.Wrap(errs.CodeInternal, err, "cannot flush %s", name)
+	}
+	if err := temp.Close(); err != nil {
+		return errs.Wrap(errs.CodeInternal, err, "cannot close %s", name)
+	}
+	if err := os.Rename(name, path); err != nil {
+		return errs.Wrap(errs.CodeInternal, err, "cannot replace %s", path)
+	}
+	return nil
 }
 
 func (s *Server) handleProjectStart(w http.ResponseWriter, r *http.Request) {

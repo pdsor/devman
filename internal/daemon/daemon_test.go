@@ -552,6 +552,63 @@ func TestSettingsCanBeReadAndWritten(t *testing.T) {
 	}
 }
 
+// TestConfigFileCanBeReadAndReplaced covers the endpoint the GUI's configuration
+// editor uses. There is only one representation of a project's configuration —
+// the file the user edits by hand — so the API serves and replaces that file
+// rather than a parsed projection of it.
+func TestConfigFileCanBeReadAndReplaced(t *testing.T) {
+	h := newHarness(t)
+	api := h.client()
+
+	document, err := api.ConfigFile(h.projectID)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if !strings.Contains(document.Content, "api:") {
+		t.Fatalf("the served content is not the project's config:\n%s", document.Content)
+	}
+	if document.Validation == nil || !document.Validation.Valid {
+		t.Fatalf("expected a valid document, got %+v", document.Validation)
+	}
+
+	// An invalid edit must be refused, and the file on disk must be untouched:
+	// losing the user's previous configuration to a typo is not acceptable.
+	broken := document.Content + "\nnope: true\n"
+	if _, err := api.SaveConfigFile(h.projectID, broken); !errs.Is(err, errs.CodeConfigInvalid) {
+		t.Fatalf("expected CONFIG_INVALID, got %v", err)
+	}
+	onDisk, err := os.ReadFile(document.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(onDisk) != document.Content {
+		t.Fatal("a refused edit must not be written")
+	}
+
+	updated := strings.Replace(document.Content, "display_name: API", "display_name: Service", 1)
+	if updated == document.Content {
+		t.Fatal("the fixture no longer contains the text this test edits")
+	}
+	saved, err := api.SaveConfigFile(h.projectID, updated)
+	if err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	if saved.Validation == nil || !saved.Validation.Valid {
+		t.Fatalf("expected the saved document to validate: %+v", saved.Validation)
+	}
+	// A cosmetic edit does not change what the project executes, so trust holds.
+	if !saved.Trusted {
+		t.Fatal("renaming a display name must not withdraw trust")
+	}
+	reread, err := api.ConfigFile(h.projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reread.Content, "display_name: Service") {
+		t.Fatalf("the edit was not persisted:\n%s", reread.Content)
+	}
+}
+
 func waitFor(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

@@ -277,6 +277,32 @@ func (c *Client) Validate(id string) (*config.ValidationResult, error) {
 	return &out, err
 }
 
+// ConfigDocument is a project's devman.yaml as text, with its validation state.
+type ConfigDocument struct {
+	Path       string                   `json:"path"`
+	Content    string                   `json:"content"`
+	Validation *config.ValidationResult `json:"validation,omitempty"`
+	Trusted    bool                     `json:"trusted"`
+}
+
+// ConfigFile reads a project's configuration file.
+func (c *Client) ConfigFile(id string) (ConfigDocument, error) {
+	var out ConfigDocument
+	err := c.do(nil, http.MethodGet, "/projects/"+url.PathEscape(id)+"/config", nil, &out)
+	return out, err
+}
+
+// SaveConfigFile validates and writes a project's configuration file.
+//
+// An invalid document is refused rather than written, and the returned error
+// carries the validator's own findings so an editor can show them inline.
+func (c *Client) SaveConfigFile(id, content string) (ConfigDocument, error) {
+	var out ConfigDocument
+	err := c.do(nil, http.MethodPut, "/projects/"+url.PathEscape(id)+"/config",
+		map[string]string{"content": content}, &out)
+	return out, err
+}
+
 // Selection is the service set a project-level command applies to.
 type Selection struct {
 	Services []string `json:"services,omitempty"`

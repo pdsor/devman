@@ -107,6 +107,8 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("DELETE "+base+"/projects/{id}", s.handleProjectUnregister)
 	mux.HandleFunc("POST "+base+"/projects/{id}/trust", s.handleProjectTrust)
 	mux.HandleFunc("GET "+base+"/projects/{id}/validate", s.handleProjectValidate)
+	mux.HandleFunc("GET "+base+"/projects/{id}/config", s.handleProjectConfigGet)
+	mux.HandleFunc("PUT "+base+"/projects/{id}/config", s.handleProjectConfigSet)
 	mux.HandleFunc("POST "+base+"/projects/{id}/start", s.handleProjectStart)
 	mux.HandleFunc("POST "+base+"/projects/{id}/stop", s.handleProjectStop)
 	mux.HandleFunc("POST "+base+"/projects/{id}/restart", s.handleProjectRestart)
