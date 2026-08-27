@@ -8,12 +8,14 @@ import { useMemo, useState } from "react";
 import { useFeed } from "../feed";
 import { useResource } from "../hooks";
 import { clockTime } from "../format";
+import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Chip, Empty, Page, Panel, Strip } from "../ui";
 import type { DaemonEvent } from "../api/types";
 
 export function EventsPage() {
   const navigate = useNav();
+  const t = useT();
   const { events, connected } = useFeed();
   const history = useResource((api) => api.events(200), "events");
   const [needle, setNeedle] = useState("");
@@ -38,10 +40,10 @@ export function EventsPage() {
   }, [merged, needle]);
 
   return (
-    <Page title="Activity" lede="Every state change the daemon published, newest first.">
+    <Page title={t("events.title")} lede={t("events.lede")}>
       <Panel padded={false}>
         <div className="panel-head">
-          <h2>Last {Math.min(40, merged.length)} events</h2>
+          <h2>{t("events.last", { count: Math.min(40, merged.length) })}</h2>
           <div className="spacer" />
           <Strip events={[...merged].reverse()} ticks={60} />
         </div>
@@ -49,29 +51,29 @@ export function EventsPage() {
           <input
             className="input mono"
             style={{ width: 240 }}
-            placeholder="filter by type, project or service"
+            placeholder={t("events.filter")}
             value={needle}
             onChange={(event) => setNeedle(event.target.value)}
           />
           <div className="spacer" />
-          <Chip tone={connected ? "ok" : "idle"} label={connected ? "STREAMING" : "NOT STREAMING"} />
+          <Chip tone={connected ? "ok" : "idle"} label={connected ? t("events.streaming") : t("events.notStreaming")} />
           <Button small variant="quiet" onClick={history.reload}>
-            Reload history
+            {t("events.reloadHistory")}
           </Button>
         </div>
 
         {visible.length === 0 ? (
-          <Empty>{merged.length === 0 ? "Nothing has happened yet." : "Nothing matches this filter."}</Empty>
+          <Empty>{merged.length === 0 ? t("events.emptyNone") : t("events.emptyFilter")}</Empty>
         ) : (
           <table>
             <thead>
               <tr>
-                <th className="num">Seq</th>
-                <th>Time</th>
-                <th>Type</th>
-                <th>Project</th>
-                <th>Service</th>
-                <th>Message</th>
+                <th className="num">{t("events.col.seq")}</th>
+                <th>{t("events.col.time")}</th>
+                <th>{t("events.col.type")}</th>
+                <th>{t("events.col.project")}</th>
+                <th>{t("events.col.service")}</th>
+                <th>{t("events.col.message")}</th>
               </tr>
             </thead>
             <tbody>
@@ -82,7 +84,11 @@ export function EventsPage() {
                   <td>{event.type}</td>
                   <td>
                     {event.project ? (
-                      <button type="button" className="link" onClick={() => navigate({ page: "project", id: event.project ?? "" })}>
+                      <button
+                        type="button"
+                        className="link"
+                        onClick={() => navigate({ page: "project", id: event.project ?? "" })}
+                      >
                         {event.project}
                       </button>
                     ) : (

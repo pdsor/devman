@@ -8,6 +8,7 @@ import type { ReactNode } from "react";
 
 import type { DaemonEvent, EventType } from "./api/types";
 import { clockTime, toneClass, type Tone } from "./format";
+import { useLocale, useT } from "./i18n";
 
 export function Page(props: {
   title: string;
@@ -44,9 +45,9 @@ export function Panel(props: { title?: string; aside?: ReactNode; padded?: boole
   );
 }
 
-export function Chip(props: { tone: Tone; label: string; pulsing?: boolean }) {
+export function Chip(props: { tone: Tone; label: string; pulsing?: boolean; title?: string }) {
   return (
-    <span className={`chip ${toneClass(props.tone)}`}>
+    <span className={`chip ${toneClass(props.tone)}`} title={props.title}>
       <span className={props.pulsing ? "dot pulsing" : "dot"} />
       {props.label}
     </span>
@@ -124,13 +125,14 @@ export function Button(props: {
  * one that has been quietly running — without reading a single line of text.
  */
 export function Strip(props: { events: DaemonEvent[]; ticks?: number }) {
+  const t = useT();
   const width = props.ticks ?? 28;
   const recent = props.events.slice(-width);
   if (recent.length === 0) {
-    return <span className="strip-empty">no events yet</span>;
+    return <span className="strip-empty">{t("strip.empty")}</span>;
   }
   return (
-    <div className="strip" role="img" aria-label={`${recent.length} recent events`}>
+    <div className="strip" role="img" aria-label={t("strip.label", { count: recent.length })}>
       {recent.map((event) => {
         const shape = eventShape(event.type);
         return (
@@ -142,6 +144,24 @@ export function Strip(props: { events: DaemonEvent[]; ticks?: number }) {
           />
         );
       })}
+    </div>
+  );
+}
+
+/** LanguageChoice is the two-language switch. It appears both in Settings and on
+ *  the connect screen, because a user who cannot reach Settings yet — no daemon
+ *  running — still needs to be able to read the page. */
+export function LanguageChoice() {
+  const { locale, setLocale } = useLocale();
+  const t = useT();
+  return (
+    <div className="row" style={{ gap: 6 }}>
+      <Button small variant={locale === "zh" ? "primary" : undefined} onClick={() => setLocale("zh")}>
+        {t("settings.languageZh")}
+      </Button>
+      <Button small variant={locale === "en" ? "primary" : undefined} onClick={() => setLocale("en")}>
+        {t("settings.languageEn")}
+      </Button>
     </div>
   );
 }

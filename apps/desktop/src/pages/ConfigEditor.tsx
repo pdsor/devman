@@ -8,12 +8,14 @@ import { useEffect, useState } from "react";
 
 import { ApiError } from "../api/client";
 import { useAction, useResource } from "../hooks";
+import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Notice, Page, Panel } from "../ui";
 import type { ApiErrorBody, ValidationResult } from "../api/types";
 
 export function ConfigPage(props: { id: string }) {
   const navigate = useNav();
+  const t = useT();
   const document = useResource((api) => api.configFile(props.id), props.id);
   const project = useResource((api) => api.project(props.id), props.id);
   const [draft, setDraft] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export function ConfigPage(props: { id: string }) {
     setSaved(false);
     const outcome = await save.run(async (api) => {
       await api.saveConfigFile(props.id, content);
-    }, "saving");
+    }, t("action.saving"));
     if (outcome.ok) {
       setDraft(null);
       setSaved(true);
@@ -52,62 +54,66 @@ export function ConfigPage(props: { id: string }) {
 
   return (
     <Page
-      title="Configuration"
+      title={t("config.title")}
       lede={document.data?.path ?? "devman.yaml"}
       actions={
         <>
           <Button variant="primary" disabled={!dirty || save.pending !== null} onClick={() => void submit()}>
-            {save.pending ? "Saving…" : "Save"}
+            {save.pending ? t("config.saving") : t("config.save")}
           </Button>
           <Button variant="quiet" disabled={!dirty} onClick={() => setDraft(null)}>
-            Revert
+            {t("config.revert")}
           </Button>
           <Button variant="quiet" onClick={() => navigate({ page: "project", id: props.id })}>
-            Back to services
+            {t("config.back")}
           </Button>
         </>
       }
     >
-      {document.error ? <Notice tone="bad" title="Cannot read the configuration">{document.error}</Notice> : null}
+      {document.error ? <Notice tone="bad" title={t("config.readFailed")}>{document.error}</Notice> : null}
 
       {/* A YAML parse error arrives without structured findings, so the message
           itself has to be shown or the refusal would be silent. */}
       {save.error && !refused ? (
-        <Notice tone="bad" title={save.code || "The save failed"}>{save.error}</Notice>
+        <Notice tone="bad" title={save.code || t("config.saveFailed")}>{save.error}</Notice>
       ) : null}
 
       {refused ? (
-        <Notice tone="bad" title="Not saved — the configuration is invalid">
-          The file on disk is unchanged. Fix the findings below and save again.
-        </Notice>
+        <Notice tone="bad" title={t("config.refusedTitle")}>{t("config.refusedBody")}</Notice>
       ) : null}
 
       {saved && project.data && !project.data.trusted ? (
         <Notice
           tone="warn"
-          title="Saved, and this project needs approval again"
+          title={t("config.savedNeedsTrustTitle")}
           actions={
             <Button
               small
               onClick={async () => {
-                if ((await save.run((api) => api.trust(props.id), "approving")).ok) project.reload();
+                if ((await save.run((api) => api.trust(props.id), t("action.approving"))).ok) project.reload();
               }}
             >
-              Approve
+              {t("config.approve")}
             </Button>
           }
         >
-          The edit changed what the project executes, so DevMan is asking again before it runs anything.
+          {t("config.savedNeedsTrustBody")}
         </Notice>
       ) : null}
 
-      {saved && project.data?.trusted ? <Notice tone="ok" title="Saved">Restart the services to pick up the change.</Notice> : null}
+      {saved && project.data?.trusted ? (
+        <Notice tone="ok" title={t("config.savedTitle")}>{t("config.savedBody")}</Notice>
+      ) : null}
 
       <Panel padded={false}>
         <div className="panel-head">
           <h2>devman.yaml</h2>
           <div className="spacer" />
-          {dirty ? <span className="mono t-warn">unsaved changes</span> : <span className="mono faint">in sync with disk</span>}
+          {dirty ? (
+            <span className="mono t-warn">{t("config.dirty")}</span>
+          ) : (
+            <span className="mono faint">{t("config.inSync")}</span>
+          )}
         </div>
         <div className="panel-body">
           <textarea
@@ -125,6 +131,7 @@ export function ConfigPage(props: { id: string }) {
 }
 
 function Findings(props: { validation: ValidationResult | null }) {
+  const t = useT();
   const validation = props.validation;
   if (!validation) return null;
   const errors = validation.errors ?? [];
@@ -132,18 +139,18 @@ function Findings(props: { validation: ValidationResult | null }) {
   if (errors.length === 0 && warnings.length === 0) {
     return (
       <p className="mono t-ok" style={{ marginTop: 12 }}>
-        valid
+        {t("config.valid")}
       </p>
     );
   }
   return (
-    <Panel title="Findings" padded={false}>
+    <Panel title={t("config.findings")} padded={false}>
       <table>
         <thead>
           <tr>
-            <th>Kind</th>
-            <th>Where</th>
-            <th>What</th>
+            <th>{t("config.col.kind")}</th>
+            <th>{t("config.col.where")}</th>
+            <th>{t("config.col.what")}</th>
           </tr>
         </thead>
         <tbody>
@@ -160,9 +167,12 @@ function Findings(props: { validation: ValidationResult | null }) {
 }
 
 function Row(props: { kind: "error" | "warning"; issue: ApiErrorBody }) {
+  const t = useT();
   return (
     <tr>
-      <td className={props.kind === "error" ? "t-bad" : "t-warn"}>{props.issue.code}</td>
+      <td className={props.kind === "error" ? "t-bad" : "t-warn"} title={t(props.kind === "error" ? "config.error" : "config.warning")}>
+        {props.issue.code}
+      </td>
       <td>{props.issue.path || "—"}</td>
       <td>{props.issue.message}</td>
     </tr>

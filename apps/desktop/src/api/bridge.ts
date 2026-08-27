@@ -64,13 +64,15 @@ export async function resolveEndpoint(): Promise<Endpoint> {
   if (inTauri()) return invoke<Endpoint>("daemon_endpoint");
   const manual = manualEndpoint();
   if (manual) return manual;
-  throw new Error("no daemon address is configured");
+  // Codes, not sentences: the window renders the failure and the window is the
+  // side that knows which language to say it in.
+  throw new Error("NO_ENDPOINT");
 }
 
 /** startDaemon launches the daemon and waits for it to answer. */
 export async function startDaemon(): Promise<Endpoint> {
   if (!inTauri()) {
-    throw new Error("starting the daemon needs the DevMan desktop app; run `devman daemon start`");
+    throw new Error("NEEDS_DESKTOP");
   }
   return invoke<Endpoint>("start_daemon");
 }

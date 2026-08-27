@@ -1,4 +1,5 @@
-// Settings: the daemon's global configuration, edited one key at a time.
+// Settings: the daemon's global configuration, edited one key at a time, plus the
+// two settings that belong to this window rather than to DevMan.
 //
 // The daemon revalidates the whole file on every write and refuses an edit it
 // could not start from, so a bad value is reported here rather than persisted.
@@ -8,10 +9,12 @@ import { useState } from "react";
 import { useAction, useResource } from "../hooks";
 import { forgetManualEndpoint, inTauri } from "../api/bridge";
 import { useApi } from "../api/context";
-import { Button, Notice, Page, Panel } from "../ui";
+import { useT } from "../i18n";
+import { Button, LanguageChoice, Notice, Page, Panel } from "../ui";
 
 export function SettingsPage() {
   const api = useApi();
+  const t = useT();
   const settings = useResource((client) => client.settings(), "settings");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const save = useAction();
@@ -21,7 +24,7 @@ export function SettingsPage() {
 
   const commit = async (key: string, value: string) => {
     setSavedKey("");
-    const outcome = await save.run((client) => client.setSetting(key, value), `saving ${key}`);
+    const outcome = await save.run((client) => client.setSetting(key, value), t("action.savingKey", { key }));
     if (!outcome.ok) return;
     setSavedKey(key);
     setDrafts((current) => {
@@ -33,21 +36,34 @@ export function SettingsPage() {
   };
 
   return (
-    <Page title="Settings" lede={`Applies to every project on this machine. Stored in the daemon's config.yaml.`}>
-      {settings.error ? <Notice tone="bad" title="Cannot read settings">{settings.error}</Notice> : null}
+    <Page title={t("settings.title")} lede={t("settings.lede")}>
+      {settings.error ? <Notice tone="bad" title={t("settings.readFailed")}>{settings.error}</Notice> : null}
       {save.error ? (
-        <Notice tone="bad" title={save.code || "The setting was not saved"} actions={<Button small variant="quiet" onClick={save.clear}>Dismiss</Button>}>
+        <Notice
+          tone="bad"
+          title={save.code || t("settings.saveFailed")}
+          actions={<Button small variant="quiet" onClick={save.clear}>{t("common.dismiss")}</Button>}
+        >
           {save.error}
         </Notice>
       ) : null}
-      {savedKey ? <Notice tone="ok" title={`Saved ${savedKey}`}>Some settings only affect services started from now on.</Notice> : null}
+      {savedKey ? (
+        <Notice tone="ok" title={t("settings.savedKey", { key: savedKey })}>{t("settings.savedBody")}</Notice>
+      ) : null}
 
-      <Panel title="Values" padded={false}>
+      <Panel title={t("settings.language")}>
+        <p className="muted" style={{ marginTop: 0 }}>
+          {t("settings.languageBody")}
+        </p>
+        <LanguageChoice />
+      </Panel>
+
+      <Panel title={t("settings.values")} padded={false}>
         <table>
           <thead>
             <tr>
-              <th style={{ width: "34%" }}>Key</th>
-              <th>Value</th>
+              <th style={{ width: "34%" }}>{t("settings.col.key")}</th>
+              <th>{t("settings.col.value")}</th>
               <th />
             </tr>
           </thead>
@@ -76,7 +92,7 @@ export function SettingsPage() {
                       disabled={!dirty || save.pending !== null}
                       onClick={() => void commit(key, current)}
                     >
-                      Save
+                      {t("common.save")}
                     </Button>
                   </td>
                 </tr>
@@ -86,23 +102,24 @@ export function SettingsPage() {
         </table>
       </Panel>
 
-      <Panel title="This window">
-        <p className="muted" style={{ marginTop: 0 }}>
-          Connected to <code className="mono">{api.endpoint.base_url}</code>
-          {api.endpoint.pid ? ` (daemon pid ${api.endpoint.pid})` : ""}.
+      <Panel title={t("settings.window")}>
+        <p className="muted mono" style={{ marginTop: 0 }}>
+          {api.endpoint.pid
+            ? t("settings.connectedToPid", { url: api.endpoint.base_url, pid: api.endpoint.pid })
+            : t("settings.connectedTo", { url: api.endpoint.base_url })}
         </p>
         <div className="row wrap">
           <Button
             variant="danger"
             onClick={async () => {
-              if ((await save.run((client) => client.shutdownDaemon(), "stopping the daemon")).ok) {
+              if ((await save.run((client) => client.shutdownDaemon(), t("action.shuttingDown"))).ok) {
                 window.location.reload();
               }
             }}
             disabled={save.pending !== null}
-            title="Stops every service, then the daemon"
+            title={t("settings.shutdownHint")}
           >
-            Stop all services and shut down the daemon
+            {t("settings.shutdown")}
           </Button>
           {!inTauri() ? (
             <Button
@@ -112,7 +129,7 @@ export function SettingsPage() {
                 window.location.reload();
               }}
             >
-              Forget this address
+              {t("settings.forget")}
             </Button>
           ) : null}
         </div>

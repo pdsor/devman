@@ -9,6 +9,8 @@ import type {
   Service,
   PortStatus,
 } from "./api/types";
+import type { Translate } from "./i18n";
+import type { MessageKey } from "./i18n/messages";
 
 export type Tone = "ok" | "warn" | "bad" | "blocked" | "idle" | "info";
 
@@ -81,16 +83,17 @@ export function isTransitional(status: ProcessStatus): boolean {
   return status === "STARTING" || status === "STOPPING";
 }
 
-export function uptime(seconds: number | undefined): string {
+export function uptime(seconds: number | undefined, t: Translate): string {
   if (!seconds || seconds < 0) return "—";
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const rest = Math.floor(seconds % 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${rest}s`;
-  return `${rest}s`;
+  const unit = (value: number, key: MessageKey) => `${value}${t(key)}`;
+  if (days > 0) return `${unit(days, "unit.day")} ${unit(hours, "unit.hour")}`;
+  if (hours > 0) return `${unit(hours, "unit.hour")} ${unit(minutes, "unit.minute")}`;
+  if (minutes > 0) return `${unit(minutes, "unit.minute")} ${unit(rest, "unit.second")}`;
+  return unit(rest, "unit.second");
 }
 
 export function clockTime(iso: string | undefined): string {
@@ -121,10 +124,28 @@ export function projectLabel(name: string, displayName?: string): string {
   return displayName && displayName !== name ? displayName : name;
 }
 
-/** captureWarning explains a service whose output DevMan can no longer see. */
-export function captureWarning(service: Service): string | null {
+/** captureWarning names the message explaining a service whose output DevMan can
+ *  no longer see. The caller translates it. */
+export function captureWarning(service: Service): MessageKey | null {
   if (service.observability.log_capture !== "detached") return null;
-  return service.observability.adopted
-    ? "This process survived a daemon restart, so its output is no longer captured. Restart the service to get logs back."
-    : "Output capture was lost. Restart the service to get logs back.";
+  return service.observability.adopted ? "svc.captureAdopted" : "svc.captureLost";
+}
+
+/** The next four map a daemon token to the key of its one-line gloss. The token
+ *  itself is always shown; the gloss goes in a tooltip, so the words DevMan's CLI
+ *  and JSON use stay the words on screen. */
+export function processStatusHint(status: ProcessStatus): MessageKey {
+  return `status.${status}` as MessageKey;
+}
+
+export function healthHint(status: HealthStatus): MessageKey {
+  return `health.${status}` as MessageKey;
+}
+
+export function projectStatusHint(status: ProjectStatus): MessageKey {
+  return `project.status.${status}` as MessageKey;
+}
+
+export function portStatusHint(status: PortStatus): MessageKey {
+  return `port.${status}` as MessageKey;
 }

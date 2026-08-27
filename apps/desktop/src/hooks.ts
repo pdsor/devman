@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Api } from "./api/client";
 import { errorCode, errorMessage } from "./api/client";
 import { useApi } from "./api/context";
+import { describeFailure, useT } from "./i18n";
 import type { DaemonEvent, LogRecord } from "./api/types";
 
 export interface Resource<T> {
@@ -32,12 +33,15 @@ export function useResource<T>(
   intervalMs = 0,
 ): Resource<T> {
   const api = useApi();
+  const t = useT();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
   const loader = useRef(load);
   loader.current = load;
+  const describe = useRef(t);
+  describe.current = t;
 
   const reload = useCallback(() => setNonce((value) => value + 1), []);
 
@@ -53,7 +57,7 @@ export function useResource<T>(
       })
       .catch((cause: unknown) => {
         if (!live) return;
-        setError(errorMessage(cause));
+        setError(describeFailure(describe.current, errorMessage(cause)));
       })
       .finally(() => {
         if (live) setLoading(false);
@@ -134,7 +138,7 @@ export interface Outcome {
 }
 
 export interface Action {
-  run: (task: (api: Api) => Promise<unknown>, label?: string) => Promise<Outcome>;
+  run: (task: (api: Api) => Promise<unknown>, label: string) => Promise<Outcome>;
   pending: string | null;
   error: string | null;
   code: string;
@@ -150,12 +154,13 @@ export interface Action {
  */
 export function useAction(): Action {
   const api = useApi();
+  const t = useT();
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [code, setCode] = useState("");
 
   const run = useCallback(
-    async (task: (client: Api) => Promise<unknown>, label = "working"): Promise<Outcome> => {
+    async (task: (client: Api) => Promise<unknown>, label: string): Promise<Outcome> => {
       setPending(label);
       setError(null);
       setCode("");
@@ -163,14 +168,14 @@ export function useAction(): Action {
         await task(api);
         return { ok: true, cause: null };
       } catch (failure: unknown) {
-        setError(errorMessage(failure));
+        setError(describeFailure(t, errorMessage(failure)));
         setCode(errorCode(failure));
         return { ok: false, cause: failure };
       } finally {
         setPending(null);
       }
     },
-    [api],
+    [api, t],
   );
 
   return {

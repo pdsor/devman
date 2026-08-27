@@ -8,10 +8,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFeedSignal } from "../feed";
 import { useLogStream, useResource } from "../hooks";
 import { captureWarning, clockTime } from "../format";
+import { useT } from "../i18n";
 import { Button, Empty, Notice, Page, Panel } from "../ui";
 import type { Service } from "../api/types";
 
 export function LogsPage(props: { projectID?: string; service?: string }) {
+  const t = useT();
   const signal = useFeedSignal();
   const projects = useResource((api) => api.projects(false), signal);
   const [projectID, setProjectID] = useState(props.projectID ?? "");
@@ -66,19 +68,22 @@ export function LogsPage(props: { projectID?: string; service?: string }) {
   const capture = selected ? captureWarning(selected) : null;
 
   return (
-    <Page title="Logs" lede="Output DevMan captured, with the stream and timestamp it arrived on.">
-      {capture ? <Notice tone="warn" title="Output is not being captured">{capture}</Notice> : null}
+    <Page title={t("logs.title")} lede={t("logs.lede")}>
+      {capture ? <Notice tone="warn" title={t("logs.captureTitle")}>{t(capture)}</Notice> : null}
       {selected && selected.observability.log_capture === "none" ? (
-        <Notice tone="info" title="This service logs elsewhere">
-          Its configuration sets <code className="mono">log_capture: none</code>, so DevMan keeps no copy of its output.
-        </Notice>
+        <Notice tone="info" title={t("logs.noneTitle")}>{t("logs.noneBody")}</Notice>
       ) : null}
 
       <Panel padded={false}>
         <div className="panel-head">
           <label className="row" style={{ gap: 6 }}>
-            <span className="faint mono">project</span>
-            <select className="input mono" style={{ width: 220 }} value={projectID} onChange={(event) => setProjectID(event.target.value)}>
+            <span className="faint mono">{t("logs.project")}</span>
+            <select
+              className="input mono"
+              style={{ width: 220 }}
+              value={projectID}
+              onChange={(event) => setProjectID(event.target.value)}
+            >
               {(projects.data ?? []).map((project) => (
                 <option key={project.id} value={project.id}>
                   {project.name}
@@ -87,8 +92,13 @@ export function LogsPage(props: { projectID?: string; service?: string }) {
             </select>
           </label>
           <label className="row" style={{ gap: 6 }}>
-            <span className="faint mono">service</span>
-            <select className="input mono" style={{ width: 180 }} value={serviceName} onChange={(event) => setServiceName(event.target.value)}>
+            <span className="faint mono">{t("logs.service")}</span>
+            <select
+              className="input mono"
+              style={{ width: 180 }}
+              value={serviceName}
+              onChange={(event) => setServiceName(event.target.value)}
+            >
               {(services.data ?? []).map((service) => (
                 <option key={service.name} value={service.name}>
                   {service.name}
@@ -97,14 +107,14 @@ export function LogsPage(props: { projectID?: string; service?: string }) {
             </select>
           </label>
           <label className="row" style={{ gap: 6 }}>
-            <span className="faint mono">stream</span>
+            <span className="faint mono">{t("logs.stream")}</span>
             <select
               className="input mono"
               style={{ width: 110 }}
               value={stream}
               onChange={(event) => setStream(event.target.value as "all" | "stdout" | "stderr")}
             >
-              <option value="all">all</option>
+              <option value="all">{t("logs.all")}</option>
               <option value="stdout">stdout</option>
               <option value="stderr">stderr</option>
             </select>
@@ -112,20 +122,22 @@ export function LogsPage(props: { projectID?: string; service?: string }) {
           <input
             className="input mono"
             style={{ width: 200 }}
-            placeholder="filter"
+            placeholder={t("logs.filter")}
             value={needle}
             onChange={(event) => setNeedle(event.target.value)}
           />
           <div className="spacer" />
-          <span className={connected ? "mono t-ok" : "mono faint"}>{connected ? "live" : "not streaming"}</span>
+          <span className={connected ? "mono t-ok" : "mono faint"}>
+            {connected ? t("logs.live") : t("logs.notStreaming")}
+          </span>
           <Button small variant={follow ? "primary" : undefined} onClick={() => setFollow(!follow)}>
-            {follow ? "Following" : "Follow"}
+            {follow ? t("logs.following") : t("logs.follow")}
           </Button>
         </div>
 
         <div className="log" ref={viewport} onWheel={() => setFollow(false)}>
           {visible.length === 0 ? (
-            <Empty>{lines.length === 0 ? "No output captured yet." : "Nothing matches this filter."}</Empty>
+            <Empty>{lines.length === 0 ? t("logs.emptyNone") : t("logs.emptyFilter")}</Empty>
           ) : (
             visible.map((line) => (
               <div className={`log-line ${line.stream}`} key={`${line.seq}`}>
@@ -138,7 +150,7 @@ export function LogsPage(props: { projectID?: string; service?: string }) {
       </Panel>
 
       <p className="muted mono" style={{ marginTop: 10 }}>
-        {visible.length} of {lines.length} lines
+        {t("logs.count", { shown: visible.length, total: lines.length })}
       </p>
     </Page>
   );

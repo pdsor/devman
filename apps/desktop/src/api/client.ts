@@ -68,7 +68,9 @@ export class Api {
       },
       body: body === undefined ? null : JSON.stringify(body),
     }).catch((cause: unknown) => {
-      throw new ApiError("DAEMON_NOT_RUNNING", `cannot reach the daemon: ${errorMessage(cause)}`);
+      // Prefixed with the code so the window can say this in the user's language
+      // while still showing the browser's own detail.
+      throw new ApiError("DAEMON_NOT_RUNNING", `DAEMON_NOT_RUNNING: ${errorMessage(cause)}`);
     });
 
     if (response.status === 204) return undefined as T;
@@ -218,5 +220,5 @@ function decodeError(status: number, text: string): ApiError {
   } catch {
     // Falls through to the status-only error below.
   }
-  return new ApiError("INTERNAL", `the daemon returned HTTP ${status}`);
+  return new ApiError("INTERNAL", `HTTP ${status}`);
 }

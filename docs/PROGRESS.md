@@ -443,6 +443,44 @@ with its findings and the file on disk is left exactly as it was.
 Verified with `go test ./...`, `tsc --noEmit`, `vite build`, and `cargo build`
 for the shell.
 
+## GUI localisation — Chinese by default, English optional — done
+
+The window speaks Chinese out of the box and can be switched to English from
+Settings or from the connect screen. The choice is stored in `localStorage`
+(`devman.locale`) and, on first run, taken from the browser locale — anything
+that is not English falls back to Chinese, because that is the default the
+project asked for.
+
+`src/i18n/messages.ts` holds both dictionaries. The Chinese one is declared
+`as const` and its keys *are* the key type (`export type MessageKey = keyof
+typeof zh`); English is declared as `Record<MessageKey, string>`. A missing or
+misspelled translation is therefore a compile error, not a string that silently
+renders as a key — `tsc` caught one missing key while this was being written,
+which is the whole point of the arrangement.
+
+Daemon vocabulary is deliberately **not** translated. `RUNNING`, `BLOCKED`,
+`UNVERIFIED`, `CONFIG_INVALID` and the rest stay exactly as they appear in
+`--json`, in the events and in the docs; the Chinese explanation lives in the
+tooltip beside them (`status.BLOCKED` → "BLOCKED：前置条件不满足，什么都没执行").
+Translating them would mean the GUI and the CLI disagree about the name of a
+state, and would break the one habit that makes DevMan diagnosable — searching
+for the token you saw on screen.
+
+Making this possible required extending the "clients render codes, not
+sentences" rule all the way out to the Rust shell: `lib.rs` now returns
+`NO_HOME`, `DAEMON_NOT_RUNNING`, `DISCOVERY_UNREADABLE`, `TOKEN_UNREADABLE`,
+`DEVMAN_NOT_FOUND`, `SPAWN_FAILED: …` and `DAEMON_NOT_READY` instead of English
+prose, and the fetch client reports a dead daemon as `DAEMON_NOT_RUNNING`
+rather than a browser network message. `describeFailure` maps a code to a
+sentence and appends whatever detail followed it; an **unknown** code is shown
+verbatim rather than replaced with a generic apology, so a failure DevMan has
+not anticipated is still readable.
+
+Durations are assembled from unit keys rather than formatted in English and
+patched, so `2 天 3 小时` and `2d 3h` are the same code path.
+
+Verified with `tsc --noEmit`, `vite build` and a release `tauri build`.
+
 ## Next
 
 - M12 packaging and CI

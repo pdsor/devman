@@ -5,13 +5,15 @@ import { useState } from "react";
 
 import { useFeedSignal } from "../feed";
 import { useAction, useResource } from "../hooks";
-import { dateTime, portTone } from "../format";
+import { dateTime, portStatusHint, portTone } from "../format";
+import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Chip, Empty, Notice, Page, Panel } from "../ui";
 import type { PortUsage } from "../api/types";
 
 export function PortsPage(props: { port?: number }) {
   const navigate = useNav();
+  const t = useT();
   const signal = useFeedSignal((event) => event.type.startsWith("PORT_"));
   const allocations = useResource((api) => api.ports(), signal, 8000);
   const [query, setQuery] = useState(props.port ? String(props.port) : "");
@@ -24,20 +26,24 @@ export function PortsPage(props: { port?: number }) {
     setUsage(null);
     await lookup.run(async (api) => {
       setUsage(await api.portUsage(port));
-    }, `checking ${port}`);
+    }, t("action.checking", { port }));
   };
 
   return (
     <Page
-      title="Ports"
-      lede="Allocations are made before a process starts, so two projects never race for the same port."
-      actions={<Button variant="quiet" onClick={allocations.reload} disabled={allocations.loading}>Refresh</Button>}
+      title={t("ports.title")}
+      lede={t("ports.lede")}
+      actions={
+        <Button variant="quiet" onClick={allocations.reload} disabled={allocations.loading}>
+          {t("common.refresh")}
+        </Button>
+      }
     >
-      {allocations.error ? <Notice tone="bad" title="Cannot list ports">{allocations.error}</Notice> : null}
+      {allocations.error ? <Notice tone="bad" title={t("ports.listFailed")}>{allocations.error}</Notice> : null}
 
       <Panel padded={false}>
         <div className="panel-head">
-          <h2>Who has a port</h2>
+          <h2>{t("ports.whoTitle")}</h2>
           <div className="spacer" />
           <input
             className="input mono"
@@ -51,30 +57,30 @@ export function PortsPage(props: { port?: number }) {
             }}
           />
           <Button small onClick={() => void check()} disabled={lookup.pending !== null || query === ""}>
-            Check
+            {t("ports.check")}
           </Button>
         </div>
         <div className="panel-body">
           {lookup.error ? <span className="mono t-bad">{lookup.error}</span> : null}
-          {!lookup.error && !usage ? <span className="muted">Enter a port number to see who holds it.</span> : null}
+          {!lookup.error && !usage ? <span className="muted">{t("ports.hint")}</span> : null}
           {usage ? <UsageAnswer usage={usage} /> : null}
         </div>
       </Panel>
 
-      <Panel title="Allocations" padded={false}>
+      <Panel title={t("ports.allocations")} padded={false}>
         {allocations.data && allocations.data.length === 0 ? (
-          <Empty>No ports are allocated. DevMan reserves them when a service starts.</Empty>
+          <Empty>{t("ports.empty")}</Empty>
         ) : (
           <table>
             <thead>
               <tr>
-                <th className="num">Port</th>
-                <th>Status</th>
-                <th>Project</th>
-                <th>Service</th>
-                <th>Name</th>
-                <th>Env</th>
-                <th>Allocated</th>
+                <th className="num">{t("ports.col.port")}</th>
+                <th>{t("ports.col.status")}</th>
+                <th>{t("ports.col.project")}</th>
+                <th>{t("ports.col.service")}</th>
+                <th>{t("ports.col.name")}</th>
+                <th>{t("ports.col.env")}</th>
+                <th>{t("ports.col.allocated")}</th>
                 <th />
               </tr>
             </thead>
@@ -83,7 +89,11 @@ export function PortsPage(props: { port?: number }) {
                 <tr key={`${allocation.project}/${allocation.service}/${allocation.port}`}>
                   <td className="num">{allocation.port}</td>
                   <td>
-                    <Chip tone={portTone(allocation.status)} label={allocation.status} />
+                    <Chip
+                      tone={portTone(allocation.status)}
+                      label={allocation.status}
+                      title={t(portStatusHint(allocation.status))}
+                    />
                   </td>
                   <td>{allocation.project}</td>
                   <td>{allocation.service}</td>
@@ -92,7 +102,7 @@ export function PortsPage(props: { port?: number }) {
                   <td>{dateTime(allocation.allocated_at)}</td>
                   <td className="actions">
                     <Button small variant="quiet" onClick={() => navigate({ page: "project", id: allocation.project })}>
-                      Open project
+                      {t("ports.openProject")}
                     </Button>
                   </td>
                 </tr>
@@ -106,29 +116,25 @@ export function PortsPage(props: { port?: number }) {
 }
 
 function UsageAnswer(props: { usage: PortUsage }) {
+  const t = useT();
   const usage = props.usage;
   if (!usage.occupied && !usage.allocation) {
-    return (
-      <span className="mono t-ok">
-        {usage.port} is free.
-      </span>
-    );
+    return <span className="mono t-ok">{t("ports.free", { port: usage.port })}</span>;
   }
   if (usage.allocation) {
     return (
       <span className="mono">
-        {usage.port} belongs to{" "}
-        <b>
-          {usage.allocation.project}/{usage.allocation.service}
-        </b>{" "}
-        ({usage.allocation.status.toLowerCase()}).
+        {t("ports.owned", {
+          port: usage.port,
+          project: usage.allocation.project,
+          service: usage.allocation.service,
+          status: usage.allocation.status.toLowerCase(),
+        })}
       </span>
     );
   }
-  return (
-    <span className="mono t-warn">
-      {usage.port} is held by a process DevMan does not manage
-      {usage.owner?.pid ? ` (pid ${usage.owner.pid}${usage.owner.name ? `, ${usage.owner.name}` : ""})` : ""}.
-    </span>
-  );
+  const owner = usage.owner?.pid
+    ? `（pid ${usage.owner.pid}${usage.owner.name ? `, ${usage.owner.name}` : ""}）`
+    : "";
+  return <span className="mono t-warn">{t("ports.foreign", { port: usage.port, owner })}</span>;
 }

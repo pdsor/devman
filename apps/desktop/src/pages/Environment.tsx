@@ -8,9 +8,11 @@
 import { useFeedSignal } from "../feed";
 import { useResource } from "../hooks";
 import { dateTime, uptime } from "../format";
+import { useT } from "../i18n";
 import { Fact, Facts, Notice, Page, Panel } from "../ui";
 
 export function EnvironmentPage() {
+  const t = useT();
   const signal = useFeedSignal((event) => event.type === "DAEMON_READY");
   const tools = useResource((api) => api.tools(), signal);
   const paths = useResource((api) => api.paths(), signal);
@@ -19,42 +21,38 @@ export function EnvironmentPage() {
   const missing = (tools.data ?? []).filter((tool) => !tool.found);
 
   return (
-    <Page
-      title="Environment"
-      lede="Resolved by the daemon, in the daemon's own process — the same lookup a service start uses."
-    >
+    <Page title={t("env.title")} lede={t("env.lede")}>
       {status.data && !status.data.info.graceful_signals ? (
-        <Notice tone="warn" title="Stops are force kills on this daemon">
-          The daemon has no console attached, so it cannot send a graceful interrupt. Services will be terminated
-          rather than asked to exit. Starting the daemon from a terminal restores graceful stops.
-        </Notice>
+        <Notice tone="warn" title={t("env.forceKillTitle")}>{t("env.forceKillBody")}</Notice>
       ) : null}
 
       {status.data ? (
         <Panel padded={false}>
           <div className="panel-head">
-            <h2>Daemon</h2>
+            <h2>{t("env.daemon")}</h2>
           </div>
           <Facts>
-            <Fact label="Version">{status.data.info.version || "dev"}</Fact>
-            <Fact label="API">{status.data.info.api_version}</Fact>
-            <Fact label="Address">{status.data.info.host}:{status.data.info.port}</Fact>
-            <Fact label="PID">{status.data.info.pid}</Fact>
-            <Fact label="Uptime">{uptime(status.data.uptime_seconds)}</Fact>
-            <Fact label="Started">{dateTime(status.data.info.started_at)}</Fact>
-            <Fact label="Projects">{status.data.projects}</Fact>
-            <Fact label="Running services">{status.data.running_services}</Fact>
+            <Fact label={t("env.version")}>{status.data.info.version || "dev"}</Fact>
+            <Fact label={t("env.api")}>{status.data.info.api_version}</Fact>
+            <Fact label={t("env.address")}>
+              {status.data.info.host}:{status.data.info.port}
+            </Fact>
+            <Fact label={t("env.pid")}>{status.data.info.pid}</Fact>
+            <Fact label={t("env.uptime")}>{uptime(status.data.uptime_seconds, t)}</Fact>
+            <Fact label={t("env.started")}>{dateTime(status.data.info.started_at)}</Fact>
+            <Fact label={t("env.projects")}>{status.data.projects}</Fact>
+            <Fact label={t("env.runningServices")}>{status.data.running_services}</Fact>
           </Facts>
         </Panel>
       ) : null}
 
       <Panel
-        title="Tools"
+        title={t("env.tools")}
         aside={
           missing.length > 0 ? (
-            <span className="mono t-warn">{missing.length} not found</span>
+            <span className="mono t-warn">{t("env.missing", { count: missing.length })}</span>
           ) : (
-            <span className="mono t-ok">all found</span>
+            <span className="mono t-ok">{t("env.allFound")}</span>
           )
         }
         padded={false}
@@ -62,15 +60,15 @@ export function EnvironmentPage() {
         <table>
           <thead>
             <tr>
-              <th>Tool</th>
-              <th>Resolved to</th>
+              <th>{t("env.col.tool")}</th>
+              <th>{t("env.col.resolved")}</th>
             </tr>
           </thead>
           <tbody>
             {(tools.data ?? []).map((tool) => (
               <tr key={tool.name}>
                 <td className={tool.found ? "" : "t-warn"}>{tool.name}</td>
-                <td className={tool.found ? "" : "faint"}>{tool.path || "not on PATH"}</td>
+                <td className={tool.found ? "" : "faint"}>{tool.path || t("env.notOnPath")}</td>
               </tr>
             ))}
           </tbody>
@@ -80,20 +78,20 @@ export function EnvironmentPage() {
       {paths.data ? (
         <Panel padded={false}>
           <div className="panel-head">
-            <h2>Files</h2>
+            <h2>{t("env.files")}</h2>
           </div>
           <Facts>
-            <Fact label="Data directory">{paths.data.home}</Fact>
-            <Fact label="Settings">{paths.data.settings}</Fact>
-            <Fact label="Database">{paths.data.database}</Fact>
-            <Fact label="Discovery">{paths.data.daemon}</Fact>
-            <Fact label="Auth token">{paths.data.auth_token}</Fact>
-            <Fact label="Logs">{paths.data.logs}</Fact>
+            <Fact label={t("env.dataDir")}>{paths.data.home}</Fact>
+            <Fact label={t("env.settings")}>{paths.data.settings}</Fact>
+            <Fact label={t("env.database")}>{paths.data.database}</Fact>
+            <Fact label={t("env.discovery")}>{paths.data.daemon}</Fact>
+            <Fact label={t("env.authToken")}>{paths.data.auth_token}</Fact>
+            <Fact label={t("env.logs")}>{paths.data.logs}</Fact>
           </Facts>
         </Panel>
       ) : null}
 
-      {tools.error ? <Notice tone="bad" title="Cannot probe tools">{tools.error}</Notice> : null}
+      {tools.error ? <Notice tone="bad" title={t("env.probeFailed")}>{tools.error}</Notice> : null}
     </Page>
   );
 }

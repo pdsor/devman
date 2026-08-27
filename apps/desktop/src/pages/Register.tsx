@@ -8,12 +8,14 @@ import { useState } from "react";
 
 import { inTauri, pickDirectory } from "../api/bridge";
 import { useAction, useResource } from "../hooks";
+import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Empty, Notice, Page, Panel } from "../ui";
 import type { Preview } from "../api/types";
 
 export function RegisterPage() {
   const navigate = useNav();
+  const t = useT();
   const [path, setPath] = useState("");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [approve, setApprove] = useState(false);
@@ -27,11 +29,11 @@ export function RegisterPage() {
     setApprove(false);
     await inspect.run(async (api) => {
       setPreview(await api.inspect(target));
-    }, "reading the project");
+    }, t("action.reading"));
   };
 
   const browse = async () => {
-    const chosen = await pickDirectory("Choose a project folder");
+    const chosen = await pickDirectory(t("register.folder"));
     if (!chosen) return;
     setPath(chosen);
     await runInspect(chosen);
@@ -41,34 +43,31 @@ export function RegisterPage() {
     if (!preview) return;
     const created = await register.run(async (api) => {
       await api.register(preview.path, approve);
-    }, "registering");
+    }, t("action.registering"));
     if (created.ok) navigate({ page: "projects" });
   };
 
   const invalid = preview?.validation && preview.validation.valid === false;
+  const issues = (list: { path?: string; message: string }[] | null | undefined) =>
+    (list ?? []).map((issue) => `${issue.path ? `${issue.path}: ` : ""}${issue.message}`).join(" · ");
 
   return (
-    <Page
-      title="Add a project"
-      lede="Point DevMan at a folder containing devman.yaml. Nothing runs until you approve what it executes."
-    >
-      <Panel title="Project folder">
+    <Page title={t("register.title")} lede={t("register.lede")}>
+      <Panel title={t("register.folder")}>
         <div className="row wrap">
           <input
             className="input mono"
             style={{ flex: 1, minWidth: 260 }}
-            placeholder={inTauri() ? "C:\\code\\my-app" : "/path/to/project"}
+            placeholder={t("register.placeholder")}
             value={path}
             onChange={(event) => setPath(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && path) void runInspect(path);
             }}
           />
-          {inTauri() ? (
-            <Button onClick={() => void browse()}>Browse…</Button>
-          ) : null}
+          {inTauri() ? <Button onClick={() => void browse()}>{t("register.browse")}</Button> : null}
           <Button variant="primary" disabled={!path || inspect.pending !== null} onClick={() => void runInspect(path)}>
-            Read it
+            {t("register.read")}
           </Button>
         </div>
         {inspect.error ? (
@@ -82,35 +81,29 @@ export function RegisterPage() {
       {preview ? (
         <>
           {preview.already_registered ? (
-            <Notice tone="info" title="Already registered">
-              Registering it again updates the record and re-reads the configuration.
-            </Notice>
+            <Notice tone="info" title={t("register.already")}>{t("register.alreadyBody")}</Notice>
           ) : null}
 
           {invalid ? (
-            <Notice tone="bad" title="This configuration will not load">
-              {(preview.validation?.errors ?? []).map((issue) => `${issue.path ? `${issue.path}: ` : ""}${issue.message}`).join(" · ")}
-            </Notice>
+            <Notice tone="bad" title={t("register.invalidTitle")}>{issues(preview.validation?.errors)}</Notice>
           ) : null}
 
           {(preview.validation?.warnings ?? []).length > 0 ? (
-            <Notice tone="warn" title="Warnings">
-              {(preview.validation?.warnings ?? []).map((issue) => `${issue.path ? `${issue.path}: ` : ""}${issue.message}`).join(" · ")}
-            </Notice>
+            <Notice tone="warn" title={t("register.warningsTitle")}>{issues(preview.validation?.warnings)}</Notice>
           ) : null}
 
-          <Panel title={`${preview.name} — what it would run`} padded={false}>
+          <Panel title={t("register.previewTitle", { name: preview.name })} padded={false}>
             {preview.execution.length === 0 ? (
-              <Empty>This configuration declares no services.</Empty>
+              <Empty>{t("register.noServices")}</Empty>
             ) : (
               <table>
                 <thead>
                   <tr>
-                    <th>Service</th>
-                    <th>Runtime</th>
-                    <th>Command</th>
-                    <th>Working directory</th>
-                    <th>Env files</th>
+                    <th>{t("register.col.service")}</th>
+                    <th>{t("register.col.runtime")}</th>
+                    <th>{t("register.col.command")}</th>
+                    <th>{t("register.col.cwd")}</th>
+                    <th>{t("register.col.envFiles")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -128,23 +121,28 @@ export function RegisterPage() {
             )}
           </Panel>
 
-          <Panel title="Approval">
+          <Panel title={t("register.approvalTitle")}>
             <p className="muted" style={{ marginTop: 0 }}>
-              Approving lets DevMan run the commands above. If a command, working directory or env file changes later,
-              DevMan asks again — cosmetic edits do not.
+              {t("register.approvalBody")}
             </p>
             <label className="row" style={{ gap: 8 }}>
               <input type="checkbox" checked={approve} onChange={(event) => setApprove(event.target.checked)} />
-              <span>I have read the commands and approve running them</span>
+              <span>{t("register.approvalCheckbox")}</span>
             </label>
             <div className="row" style={{ marginTop: 14 }}>
-              <Button variant="primary" disabled={register.pending !== null || invalid === true} onClick={() => void submit()}>
-                {approve ? "Add and approve" : "Add without approving"}
+              <Button
+                variant="primary"
+                disabled={register.pending !== null || invalid === true}
+                onClick={() => void submit()}
+              >
+                {approve ? t("register.addApprove") : t("register.addNoApprove")}
               </Button>
               <Button variant="quiet" onClick={() => setPreview(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
-              <span className="faint mono">fingerprint {preview.execution_fingerprint.slice(0, 12)}</span>
+              <span className="faint mono">
+                {t("register.fingerprint", { value: preview.execution_fingerprint.slice(0, 12) })}
+              </span>
             </div>
             {register.error ? (
               <p className="mono t-bad">
@@ -157,13 +155,13 @@ export function RegisterPage() {
       ) : null}
 
       {existing.data && existing.data.length > 0 && !preview ? (
-        <Panel title="Already known" padded={false}>
+        <Panel title={t("register.knownTitle")} padded={false}>
           <table>
             <thead>
               <tr>
-                <th>Project</th>
-                <th>Path</th>
-                <th>Trust</th>
+                <th>{t("register.col.project")}</th>
+                <th>{t("register.col.path")}</th>
+                <th>{t("register.col.trust")}</th>
               </tr>
             </thead>
             <tbody>
@@ -171,7 +169,9 @@ export function RegisterPage() {
                 <tr key={project.id}>
                   <td>{project.name}</td>
                   <td>{project.path}</td>
-                  <td className={project.trusted ? "t-ok" : "t-blocked"}>{project.trusted ? "approved" : "not approved"}</td>
+                  <td className={project.trusted ? "t-ok" : "t-blocked"}>
+                    {project.trusted ? t("project.trustApproved") : t("project.trustNotApproved")}
+                  </td>
                 </tr>
               ))}
             </tbody>

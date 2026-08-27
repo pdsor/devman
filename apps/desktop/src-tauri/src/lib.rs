@@ -54,6 +54,10 @@ fn home_dir() -> Option<PathBuf> {
 /// data_home resolves the DevMan data directory with the same rules as the Go
 /// implementation. Duplicating the rule is deliberate: the alternative is asking
 /// a daemon that may not be running where its own files are.
+///
+/// Every failure below is reported as a code rather than a sentence, because the
+/// window renders it and the window speaks the user's language. This is the same
+/// contract the daemon's HTTP API follows.
 fn data_home() -> Result<PathBuf, String> {
     if let Some(override_dir) = std::env::var_os("DEVMAN_HOME") {
         let path = PathBuf::from(override_dir);
@@ -67,13 +71,13 @@ fn data_home() -> Result<PathBuf, String> {
         if let Some(base) = std::env::var_os("LOCALAPPDATA") {
             return Ok(PathBuf::from(base).join("DevMan"));
         }
-        let home = home_dir().ok_or_else(|| "cannot resolve the user profile".to_string())?;
+        let home = home_dir().ok_or_else(|| "NO_HOME".to_string())?;
         return Ok(home.join("AppData").join("Local").join("DevMan"));
     }
 
     #[cfg(target_os = "macos")]
     {
-        let home = home_dir().ok_or_else(|| "cannot resolve the home directory".to_string())?;
+        let home = home_dir().ok_or_else(|| "NO_HOME".to_string())?;
         return Ok(home
             .join("Library")
             .join("Application Support")
@@ -85,7 +89,7 @@ fn data_home() -> Result<PathBuf, String> {
         if let Some(base) = std::env::var_os("XDG_STATE_HOME") {
             return Ok(PathBuf::from(base).join("devman"));
         }
-        let home = home_dir().ok_or_else(|| "cannot resolve the home directory".to_string())?;
+        let home = home_dir().ok_or_else(|| "NO_HOME".to_string())?;
         Ok(home.join(".local").join("state").join("devman"))
     }
 }
@@ -125,10 +129,10 @@ fn read_endpoint() -> Result<Endpoint, String> {
     let home = data_home()?;
     let layout = layout_for(&home);
 
-    let discovery = fs::read_to_string(&layout.daemon)
-        .map_err(|_| "the DevMan daemon is not running".to_string())?;
-    let record: serde_json::Value = serde_json::from_str(&discovery)
-        .map_err(|_| "the daemon discovery file is unreadable".to_string())?;
+    let discovery =
+        fs::read_to_string(&layout.daemon).map_err(|_| "DAEMON_NOT_RUNNING".to_string())?;
+    let record: serde_json::Value =
+        serde_json::from_str(&discovery).map_err(|_| "DISCOVERY_UNREADABLE".to_string())?;
 
     let host = record
         .get("host")
@@ -138,18 +142,18 @@ fn read_endpoint() -> Result<Endpoint, String> {
     let port = record
         .get("port")
         .and_then(|value| value.as_u64())
-        .ok_or_else(|| "the daemon discovery file has no port".to_string())? as u16;
+        .ok_or_else(|| "DISCOVERY_UNREADABLE".to_string())? as u16;
 
     if !listening(&host, port) {
-        return Err("the DevMan daemon is not running".to_string());
+        return Err("DAEMON_NOT_RUNNING".to_string());
     }
 
     let token = fs::read_to_string(&layout.auth_token)
-        .map_err(|_| "cannot read the DevMan auth token".to_string())?
+        .map_err(|_| "TOKEN_UNREADABLE".to_string())?
         .trim()
         .to_string();
     if token.is_empty() {
-        return Err("the DevMan auth token file is empty".to_string());
+        return Err("TOKEN_UNREADABLE".to_string());
     }
 
     let api_version = record
@@ -219,7 +223,7 @@ fn devman_executable() -> Result<PathBuf, String> {
         }
     }
 
-    Err("cannot find the devman executable; install DevMan or set DEVMAN_BIN".to_string())
+    Err("DEVMAN_NOT_FOUND".to_string())
 }
 
 /// spawn_detached starts the daemon without tying it to this window's lifetime.
@@ -243,7 +247,7 @@ fn spawn_detached(executable: &Path) -> Result<(), String> {
     command
         .spawn()
         .map(|_| ())
-        .map_err(|err| format!("cannot start the DevMan daemon: {err}"))
+        .map_err(|err| format!("SPAWN_FAILED: {err}"))
 }
 
 #[tauri::command]
@@ -255,7 +259,7 @@ fn start_daemon() -> Result<Endpoint, String> {
     spawn_detached(&executable)?;
 
     let deadline = Instant::now() + Duration::from_secs(20);
-    let mut last = String::from("the DevMan daemon did not become ready");
+    let mut last = String::from("DAEMON_NOT_READY");
     while Instant::now() < deadline {
         match read_endpoint() {
             Ok(endpoint) => return Ok(endpoint),

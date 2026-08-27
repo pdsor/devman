@@ -19,6 +19,7 @@ import {
 import { FeedContext } from "./feed";
 import { useEventFeed, useResource } from "./hooks";
 import { uptime } from "./format";
+import { describeFailure, useT } from "./i18n";
 import { NavContext, type Route } from "./nav";
 import { ConfigPage } from "./pages/ConfigEditor";
 import { EnvironmentPage } from "./pages/Environment";
@@ -29,7 +30,7 @@ import { ProjectPage } from "./pages/ProjectDetail";
 import { ProjectsPage } from "./pages/Projects";
 import { RegisterPage } from "./pages/Register";
 import { SettingsPage } from "./pages/Settings";
-import { Button, Chip } from "./ui";
+import { Button, Chip, LanguageChoice } from "./ui";
 
 export function App() {
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
@@ -91,6 +92,7 @@ export function App() {
 }
 
 function Workspace(props: { endpoint: Endpoint; onDisconnect: () => void }) {
+  const t = useT();
   const [route, setRoute] = useState<Route>({ page: "projects" });
   const feed = useEventFeed(400);
   const status = useResource((api) => api.daemonStatus(), feed.connected ? "connected" : "offline", 10000);
@@ -103,27 +105,49 @@ function Workspace(props: { endpoint: Endpoint; onDisconnect: () => void }) {
         <div className="shell">
           <nav className="rail">
             <div className="brand">
-              <strong>DevMan</strong>
+              <strong>{t("app.name")}</strong>
               <span>{props.endpoint.version || "dev"}</span>
             </div>
 
             <div className="nav">
-              <div className="nav-group">Run</div>
-              <NavItem label="Projects" active={route.page === "projects" || route.page === "project"} onClick={() => navigate({ page: "projects" })} />
-              <NavItem label="Add a project" active={route.page === "register"} onClick={() => navigate({ page: "register" })} />
+              <div className="nav-group">{t("nav.group.run")}</div>
+              <NavItem
+                label={t("nav.projects")}
+                active={route.page === "projects" || route.page === "project" || route.page === "config"}
+                onClick={() => navigate({ page: "projects" })}
+              />
+              <NavItem
+                label={t("nav.register")}
+                active={route.page === "register"}
+                onClick={() => navigate({ page: "register" })}
+              />
 
-              <div className="nav-group">Inspect</div>
-              <NavItem label="Logs" active={route.page === "logs"} onClick={() => navigate({ page: "logs" })} />
-              <NavItem label="Ports" active={route.page === "ports"} onClick={() => navigate({ page: "ports" })} />
-              <NavItem label="Activity" active={route.page === "events"} onClick={() => navigate({ page: "events" })} />
+              <div className="nav-group">{t("nav.group.inspect")}</div>
+              <NavItem label={t("nav.logs")} active={route.page === "logs"} onClick={() => navigate({ page: "logs" })} />
+              <NavItem label={t("nav.ports")} active={route.page === "ports"} onClick={() => navigate({ page: "ports" })} />
+              <NavItem
+                label={t("nav.activity")}
+                active={route.page === "events"}
+                onClick={() => navigate({ page: "events" })}
+              />
 
-              <div className="nav-group">Machine</div>
-              <NavItem label="Environment" active={route.page === "environment"} onClick={() => navigate({ page: "environment" })} />
-              <NavItem label="Settings" active={route.page === "settings"} onClick={() => navigate({ page: "settings" })} />
+              <div className="nav-group">{t("nav.group.machine")}</div>
+              <NavItem
+                label={t("nav.environment")}
+                active={route.page === "environment"}
+                onClick={() => navigate({ page: "environment" })}
+              />
+              <NavItem
+                label={t("nav.settings")}
+                active={route.page === "settings"}
+                onClick={() => navigate({ page: "settings" })}
+              />
             </div>
 
             <div className="rail-foot">
-              <span>{props.endpoint.host}:{props.endpoint.port}</span>
+              <span>
+                {props.endpoint.host}:{props.endpoint.port}
+              </span>
               <span>api {props.endpoint.api_version}</span>
             </div>
           </nav>
@@ -132,20 +156,25 @@ function Workspace(props: { endpoint: Endpoint; onDisconnect: () => void }) {
             <header className="topbar">
               <Chip
                 tone={feed.connected ? "ok" : "warn"}
-                label={feed.connected ? "DAEMON LIVE" : "RECONNECTING"}
+                label={feed.connected ? t("topbar.live") : t("topbar.reconnecting")}
                 pulsing={!feed.connected}
               />
               {status.data ? (
                 <>
-                  <span className="topbar-fact">up {uptime(status.data.uptime_seconds)}</span>
                   <span className="topbar-fact">
-                    {status.data.running_services} running · {status.data.projects} projects
+                    {t("topbar.uptime", { value: uptime(status.data.uptime_seconds, t) })}
+                  </span>
+                  <span className="topbar-fact">
+                    {t("topbar.summary", {
+                      running: status.data.running_services,
+                      projects: status.data.projects,
+                    })}
                   </span>
                 </>
               ) : null}
               <div className="spacer" />
               <Button variant="quiet" small onClick={props.onDisconnect}>
-                Reconnect
+                {t("topbar.reconnect")}
               </Button>
             </header>
 
@@ -198,52 +227,53 @@ function Connect(props: {
   onStart: () => void;
   onManual: (baseUrl: string, token: string) => void;
 }) {
-  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:8765/api/v1");
+  const t = useT();
+  const [baseUrl, setBaseUrl] = useState("http://127.0.0.1:39100/api/v1");
   const [token, setToken] = useState("");
+  const problem = describeFailure(t, props.problem);
 
   return (
     <div className="connect">
       <div className="connect-card">
-        <h1>DevMan</h1>
-        <p>
-          {props.busy
-            ? "Looking for the daemon…"
-            : props.problem
-              ? props.problem
-              : "Connected."}
-        </p>
+        <h1>{t("app.name")}</h1>
+        <p>{props.busy ? t("connect.looking") : problem ? problem : t("connect.connected")}</p>
 
         {inTauri() ? (
           <div className="row">
             <Button variant="primary" onClick={props.onStart} disabled={props.busy}>
-              Start the daemon
+              {t("connect.start")}
             </Button>
             <Button variant="quiet" onClick={props.onRetry} disabled={props.busy}>
-              Look again
+              {t("connect.retry")}
             </Button>
           </div>
         ) : (
           <>
-            <p className="muted">
-              This page is running in a browser, so it cannot start the daemon or read its token. Run{" "}
-              <code className="mono">devman daemon start</code>, then paste the address and token from{" "}
-              <code className="mono">devman paths</code>.
-            </p>
-            <label className="label" htmlFor="base">API address</label>
+            <p className="muted">{t("connect.browserNote")}</p>
+            <label className="label" htmlFor="base">
+              {t("connect.address")}
+            </label>
             <input id="base" className="input" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
             <div style={{ height: 10 }} />
-            <label className="label" htmlFor="token">Auth token</label>
+            <label className="label" htmlFor="token">
+              {t("connect.token")}
+            </label>
             <input id="token" className="input" value={token} onChange={(event) => setToken(event.target.value)} />
             <div className="row">
               <Button variant="primary" onClick={() => props.onManual(baseUrl, token)} disabled={!baseUrl || !token}>
-                Connect
+                {t("connect.connect")}
               </Button>
               <Button variant="quiet" onClick={props.onRetry}>
-                Look again
+                {t("connect.retry")}
               </Button>
             </div>
           </>
         )}
+
+        <div className="row" style={{ marginTop: 22, gap: 10 }}>
+          <span className="faint mono">{t("connect.language")}</span>
+          <LanguageChoice />
+        </div>
       </div>
     </div>
   );

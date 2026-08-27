@@ -3,13 +3,15 @@
 
 import { useFeed, useFeedSignal } from "../feed";
 import { useAction, useResource } from "../hooks";
-import { projectLabel, projectTone } from "../format";
+import { projectLabel, projectStatusHint, projectTone } from "../format";
+import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Chip, Empty, Notice, Page, Panel, Strip } from "../ui";
 import type { Project } from "../api/types";
 
 export function ProjectsPage() {
   const navigate = useNav();
+  const t = useT();
   const signal = useFeedSignal();
   const { events } = useFeed();
   const projects = useResource((api) => api.projects(true), signal);
@@ -21,31 +23,33 @@ export function ProjectsPage() {
 
   return (
     <Page
-      title="Projects"
-      lede="DevMan owns these processes. Closing a terminal, or this window, does not stop them."
+      title={t("projects.title")}
+      lede={t("projects.lede")}
       actions={
         <>
           <Button onClick={() => navigate({ page: "register" })} variant="primary">
-            Add a project
+            {t("projects.add")}
           </Button>
           <Button onClick={projects.reload} variant="quiet" disabled={projects.loading}>
-            Refresh
+            {t("common.refresh")}
           </Button>
         </>
       }
     >
-      {projects.error ? <Notice tone="bad" title="Cannot list projects">{projects.error}</Notice> : null}
+      {projects.error ? <Notice tone="bad" title={t("projects.listFailed")}>{projects.error}</Notice> : null}
       {action.error ? (
-        <Notice tone="bad" title="That did not work" actions={<Button onClick={action.clear} variant="quiet" small>Dismiss</Button>}>
+        <Notice
+          tone="bad"
+          title={action.code || t("projects.actionFailed")}
+          actions={<Button onClick={action.clear} variant="quiet" small>{t("common.dismiss")}</Button>}
+        >
           {action.error}
         </Notice>
       ) : null}
 
       {projects.data && projects.data.length === 0 ? (
         <Panel>
-          <Empty>
-            No projects yet. Add one and DevMan reads its <code className="mono">devman.yaml</code> to learn what to run.
-          </Empty>
+          <Empty>{t("projects.empty")}</Empty>
         </Panel>
       ) : null}
 
@@ -58,6 +62,7 @@ export function ProjectsPage() {
                 <Chip
                   tone={projectTone(project.status)}
                   label={project.status}
+                  title={t(projectStatusHint(project.status))}
                   pulsing={project.status === "STARTING" || project.status === "STOPPING"}
                 />
               </div>
@@ -67,16 +72,10 @@ export function ProjectsPage() {
             <Strip events={events.filter((event) => event.project === project.id)} />
 
             <div className="tally">
-              <span>
-                <b>{project.summary.running}</b>/{project.summary.total} running
-              </span>
-              <span>
-                <b>{project.summary.healthy}</b> healthy
-              </span>
+              <span>{t("projects.running", { running: project.summary.running, total: project.summary.total })}</span>
+              <span>{t("projects.healthy", { count: project.summary.healthy })}</span>
               {project.summary.failed > 0 ? (
-                <span className="t-bad">
-                  <b>{project.summary.failed}</b> failed
-                </span>
+                <span className="t-bad">{t("projects.failed", { count: project.summary.failed })}</span>
               ) : null}
             </div>
 
@@ -86,36 +85,40 @@ export function ProjectsPage() {
               </div>
             ) : null}
             {!project.trusted && !project.config_error ? (
-              <div className="mono t-blocked">not trusted — approve it before starting</div>
+              <div className="mono t-blocked">{t("projects.untrusted")}</div>
             ) : null}
 
             <div className="row wrap">
               <Button small onClick={() => navigate({ page: "project", id: project.id })}>
-                Open
+                {t("projects.open")}
               </Button>
               <Button
                 small
                 variant="primary"
                 disabled={action.pending !== null || !project.trusted}
-                title={project.trusted ? "Start every service in dependency order" : "Approve the project first"}
-                onClick={() => run((api) => api.startProject(project.id, { all: true }), `starting ${project.name}`)}
+                title={project.trusted ? t("projects.startHintTrusted") : t("projects.startHintUntrusted")}
+                onClick={() =>
+                  run((api) => api.startProject(project.id, { all: true }), t("action.starting", { name: project.name }))
+                }
               >
-                Start all
+                {t("projects.startAll")}
               </Button>
               <Button
                 small
                 disabled={action.pending !== null || project.summary.running === 0}
-                onClick={() => run((api) => api.stopProject(project.id, { all: true }), `stopping ${project.name}`)}
+                onClick={() =>
+                  run((api) => api.stopProject(project.id, { all: true }), t("action.stopping", { name: project.name }))
+                }
               >
-                Stop all
+                {t("projects.stopAll")}
               </Button>
               {!project.trusted ? (
                 <Button
                   small
                   disabled={action.pending !== null}
-                  onClick={() => run((api) => api.trust(project.id), `approving ${project.name}`)}
+                  onClick={() => run((api) => api.trust(project.id), t("action.approving"))}
                 >
-                  Approve
+                  {t("projects.approve")}
                 </Button>
               ) : null}
             </div>
@@ -130,12 +133,13 @@ export function ProjectsPage() {
 }
 
 function Summary(props: { projects: Project[] }) {
+  const t = useT();
   if (props.projects.length === 0) return null;
   const services = props.projects.reduce((total, project) => total + project.summary.total, 0);
   const running = props.projects.reduce((total, project) => total + project.summary.running, 0);
   return (
     <p className="muted mono" style={{ marginTop: 16 }}>
-      {props.projects.length} projects · {running}/{services} services running
+      {t("projects.summary", { projects: props.projects.length, running, services })}
     </p>
   );
 }
