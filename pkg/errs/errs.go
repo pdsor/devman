@@ -27,15 +27,21 @@ const (
 	CodeHealthcheckFail  Code = "HEALTHCHECK_FAILED"
 	CodeProcessCrashed   Code = "PROCESS_CRASHED"
 	CodeDockerNotFound   Code = "DOCKER_NOT_FOUND"
-	CodeServiceBlocked   Code = "SERVICE_BLOCKED"
-	CodeAlreadyRunning   Code = "ALREADY_RUNNING"
-	CodeNotRunning       Code = "NOT_RUNNING"
-	CodeDaemonNotRunning Code = "DAEMON_NOT_RUNNING"
-	CodeUnauthorized     Code = "UNAUTHORIZED"
-	CodeInternal         Code = "INTERNAL"
-	CodeUnsupported      Code = "UNSUPPORTED"
-	CodeInvalidRequest   Code = "INVALID_REQUEST"
-	CodeTimeout          Code = "TIMEOUT"
+	// CodeDockerUnavailable is the Docker CLI being present while the engine is
+	// not answering — Docker Desktop not started, the socket not shared, a
+	// DOCKER_HOST pointing nowhere. It is a different problem from a missing
+	// installation and needs a different fix, so it gets its own code rather than
+	// being flattened into INTERNAL.
+	CodeDockerUnavailable Code = "DOCKER_UNAVAILABLE"
+	CodeServiceBlocked    Code = "SERVICE_BLOCKED"
+	CodeAlreadyRunning    Code = "ALREADY_RUNNING"
+	CodeNotRunning        Code = "NOT_RUNNING"
+	CodeDaemonNotRunning  Code = "DAEMON_NOT_RUNNING"
+	CodeUnauthorized      Code = "UNAUTHORIZED"
+	CodeInternal          Code = "INTERNAL"
+	CodeUnsupported       Code = "UNSUPPORTED"
+	CodeInvalidRequest    Code = "INVALID_REQUEST"
+	CodeTimeout           Code = "TIMEOUT"
 )
 
 // Error is the canonical DevMan error. It serialises directly into API
@@ -139,7 +145,7 @@ func (e *Error) HTTPStatus() int {
 		return http.StatusForbidden
 	case CodeConfigInvalid, CodeInvalidRequest, CodeEnvMissing, CodeServiceBlocked:
 		return http.StatusBadRequest
-	case CodeCommandNotFound, CodeDockerNotFound, CodePortExhausted, CodeUnsupported:
+	case CodeCommandNotFound, CodeDockerNotFound, CodeDockerUnavailable, CodePortExhausted, CodeUnsupported:
 		return http.StatusUnprocessableEntity
 	case CodeTimeout:
 		return http.StatusGatewayTimeout

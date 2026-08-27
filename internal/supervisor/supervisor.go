@@ -340,6 +340,7 @@ func blockedCode(code errs.Code) bool {
 	switch code {
 	case errs.CodeServiceBlocked,
 		errs.CodeDockerNotFound,
+		errs.CodeDockerUnavailable,
 		errs.CodeCommandNotFound,
 		errs.CodeEnvMissing,
 		errs.CodePortConflict,

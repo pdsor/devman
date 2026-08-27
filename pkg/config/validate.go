@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/devman-project/devman/pkg/errs"
 )
 
@@ -298,13 +300,18 @@ func (c *Config) validateService(
 		}
 	}
 	if svc.Runtime == RuntimeDockerCompose && svc.Compose != nil && svc.Compose.File != "" {
+		// Relative to the service's cwd, because that is where the runtime runs
+		// `docker compose -f`. Resolving it against the project root here would
+		// let validation pass on a file the runtime never opens.
 		full := svc.Compose.File
 		if !filepath.IsAbs(full) {
-			full = filepath.Join(c.ProjectRoot, full)
+			full = filepath.Join(cwd, full)
 		}
 		if _, err := os.Stat(full); err != nil {
 			result.addError(errs.New(errs.CodeConfigInvalid,
 				"compose file not found: %s", full).At(path + ".compose.file"))
+		} else {
+			c.checkComposeService(result, path, full, svc)
 		}
 	}
 	if opts.CheckCommands && svc.Runtime == RuntimeHost && exec.Command != "" && !svc.Shell.Enabled {
@@ -315,9 +322,69 @@ func (c *Config) validateService(
 	}
 }
 
+// checkComposeService verifies that the compose file really declares the service
+// the configuration points at.
+//
+// Without this, a typo in `compose.service` is only discovered when someone
+// presses start: `docker compose up` fails, and a name that could have been
+// checked in milliseconds becomes a runtime failure. `devman validate` exists to
+// answer "will this work", so it has to read the file it delegates to.
+//
+// The check is deliberately conservative. Compose files can assemble their
+// services from other files through `include` or `extends`, and DevMan does not
+// reimplement that resolution; when one of those is present the service list is
+// incomplete and no conclusion is drawn. Silence is better than a false error
+// about a service that does exist.
+func (c *Config) checkComposeService(result *ValidationResult, path, file string, svc *Service) {
+	declared := strings.TrimSpace(svc.Compose.Service)
+	if declared == "" {
+		return
+	}
+
+	body, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+
+	var document struct {
+		Services map[string]yaml.Node `yaml:"services"`
+		Include  yaml.Node            `yaml:"include"`
+	}
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		result.addWarning(errs.New(errs.CodeConfigInvalid,
+			"compose file %s could not be parsed, so its services were not checked: %v", file, err).
+			At(path + ".compose.file"))
+		return
+	}
+	if !document.Include.IsZero() || len(document.Services) == 0 {
+		return
+	}
+	if _, ok := document.Services[declared]; ok {
+		return
+	}
+	for _, node := range document.Services {
+		// `extends` pulls a definition in from elsewhere, so the file may be an
+		// incomplete picture of what compose will end up knowing.
+		var candidate struct {
+			Extends yaml.Node `yaml:"extends"`
+		}
+		if err := node.Decode(&candidate); err == nil && !candidate.Extends.IsZero() {
+			return
+		}
+	}
+
+	names := make([]string, 0, len(document.Services))
+	for name := range document.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result.addError(errs.New(errs.CodeConfigInvalid,
+		"compose file %s has no service %q; it declares %s",
+		file, declared, strings.Join(names, ", ")).At(path + ".compose.service"))
+}
+
 // lookPath resolves a command, also accepting a path relative to cwd.
-func lookPath(command, cwd string) (string, error) {
-	if strings.ContainsAny(command, `/\`) {
+func lookPath(command, cwd string) (string, error) {	if strings.ContainsAny(command, `/\`) {
 		candidate := command
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(cwd, candidate)

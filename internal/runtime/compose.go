@@ -1,7 +1,10 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
+	"io"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -39,16 +42,29 @@ func (ComposeRuntime) Start(req StartRequest) (Handle, error) {
 	target := composeTarget(req)
 	base := composeArgs(req.Compose, req.Dir)
 
+	// The failure output is kept as well as streamed, because "docker compose up
+	// exited 1" is not a diagnosis. What compose printed is the only thing that
+	// says whether the engine is down or the service name is wrong, and those
+	// need different codes.
+	failure := &headBuffer{limit: 8 << 10}
 	upArgs := append(append([]string{}, base...), "up", "-d", target)
-	if err := runSync(docker, upArgs, req, 0); err != nil {
-		return nil, err
+	if err := runSync(docker, upArgs, req, 0, failure); err != nil {
+		return nil, classifyUpFailure(docker, req, target, failure.String(), err)
 	}
 
 	// The follower is a tracked process so its output flows into the normal log
 	// pipeline and its exit signals that the container is gone.
+	//
+	// `--tail all` rather than `--tail 0`: DevMan has just asked compose to bring
+	// this container up, and everything it has said belongs to the run the user
+	// is looking at. Following only new lines silently discards the startup
+	// output — including the reason an image fails to boot — which is exactly the
+	// output someone opens the log for. Adopting a container that has been
+	// running for a long time replays its history once; the log store's rotation
+	// bounds what that costs, and losing output is the worse failure.
 	follower, err := platform.Spawn(platform.SpawnRequest{
 		Command: docker,
-		Args:    append(append([]string{}, base...), "logs", "-f", "--tail", "0", target),
+		Args:    append(append([]string{}, base...), "logs", "-f", "--tail", "all", target),
 		Dir:     req.Dir,
 		Env:     req.Env,
 		Stdout:  req.Stdout,
@@ -99,15 +115,30 @@ func composeArgs(spec *config.ComposeSpec, dir string) []string {
 }
 
 // runSync runs a docker command to completion, streaming its output into the
-// service log so a compose failure is visible where users already look.
-func runSync(docker string, args []string, req StartRequest, timeout time.Duration) error {
+// service log so a compose failure is visible where users already look. When
+// capture is non-nil the output is also written there, for classification.
+func runSync(docker string, args []string, req StartRequest, timeout time.Duration, capture io.Writer) error {
+	stdout, stderr := req.Stdout, req.Stderr
+	if capture != nil {
+		if stdout != nil {
+			stdout = io.MultiWriter(stdout, capture)
+		} else {
+			stdout = capture
+		}
+		if stderr != nil {
+			stderr = io.MultiWriter(stderr, capture)
+		} else {
+			stderr = capture
+		}
+	}
+
 	proc, err := platform.Spawn(platform.SpawnRequest{
 		Command: docker,
 		Args:    args,
 		Dir:     req.Dir,
 		Env:     req.Env,
-		Stdout:  req.Stdout,
-		Stderr:  req.Stderr,
+		Stdout:  stdout,
+		Stderr:  stderr,
 	})
 	if err != nil {
 		return errs.Wrap(errs.CodeInternal, err, "cannot run docker %s", strings.Join(args, " "))
@@ -129,6 +160,83 @@ func runSync(docker string, args []string, req StartRequest, timeout time.Durati
 	}
 	return nil
 }
+
+// classifyUpFailure turns a failed `docker compose up` into an error a caller can
+// act on.
+//
+// Everything used to come back as INTERNAL, which told a user only that
+// something went wrong inside DevMan — while the actual causes are things they
+// can fix: start Docker, or correct a service name. The distinction also decides
+// whether the supervisor reports BLOCKED (a prerequisite is missing, nothing was
+// executed) or FAILED (DevMan tried and it broke).
+func classifyUpFailure(docker string, req StartRequest, target, output string, cause error) error {
+	if errs.Is(cause, errs.CodeTimeout) {
+		return cause
+	}
+
+	// Ask the engine directly rather than pattern-matching every phrasing the
+	// CLI has ever used for a connection failure. This runs only on the failure
+	// path, so it costs nothing when things work.
+	if !engineReachable(docker, req) {
+		return errs.New(errs.CodeDockerUnavailable,
+			"the Docker CLI is installed but the engine is not answering, so service %s cannot be started",
+			req.Service).
+			With("service", req.Service).
+			With("output", excerpt(output))
+	}
+
+	lower := strings.ToLower(output)
+	if strings.Contains(lower, "no such service") || strings.Contains(lower, "no service selected") {
+		return errs.New(errs.CodeConfigInvalid,
+			"the compose file has no service named %q", target).
+			At("services." + req.Service + ".compose.service").
+			With("service", req.Service).
+			With("output", excerpt(output))
+	}
+
+	return errs.From(cause).With("output", excerpt(output))
+}
+
+// engineReachable reports whether `docker info` succeeds with this service's
+// environment, which is what makes a DOCKER_HOST pointing at nothing detectable.
+func engineReachable(docker string, req StartRequest) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, docker, "info", "--format", "{{.ServerVersion}}")
+	cmd.Dir = req.Dir
+	cmd.Env = req.Env
+	return cmd.Run() == nil
+}
+
+// excerpt trims captured output to something that fits in an error payload.
+func excerpt(output string) string {
+	trimmed := strings.TrimSpace(output)
+	const limit = 500
+	if len(trimmed) > limit {
+		return trimmed[:limit] + "…"
+	}
+	return trimmed
+}
+
+// headBuffer keeps the first bytes written to it. The head is where a compose
+// failure explains itself; the tail is usually progress output.
+type headBuffer struct {
+	limit int
+	data  []byte
+}
+
+func (b *headBuffer) Write(p []byte) (int, error) {
+	if room := b.limit - len(b.data); room > 0 {
+		if len(p) < room {
+			room = len(p)
+		}
+		b.data = append(b.data, p[:room]...)
+	}
+	return len(p), nil
+}
+
+func (b *headBuffer) String() string { return string(b.data) }
 
 // composeHandle supervises a compose service through its log follower.
 type composeHandle struct {
