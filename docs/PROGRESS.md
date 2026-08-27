@@ -78,12 +78,37 @@ clean; the same integration tests run on all three platforms in CI.
   separate, and observability flags (`log_capture`, `adopted`) live outside the
   status enum so it does not inflate.
 
+## M4 — Project registry on SQLite — done
+
+- `internal/storage` uses the CGO-free `modernc.org/sqlite` driver, so DevMan
+  stays a single cross-compilable binary. Tables: `projects`,
+  `service_runtime`, `process_instances`, `port_allocations`, `events`, `meta`.
+- Port exclusivity is enforced by a **partial unique index** on active
+  allocations, not by an application lock. Ten goroutines racing for one port
+  produce exactly one winner and nine `PORT_CONFLICT`s.
+- `service_runtime` stores `desired_state` and `actual_state` side by side from
+  the first version, so a manual stop cannot be undone by a restart policy,
+  even across a daemon restart. It also stores process identity (pid, spawn
+  time, executable, command fingerprint) plus `log_capture` and `adopted`.
+- Unregistering a project cascades its runtime state and explicitly releases
+  its ports, so nothing leaks until the next daemon restart.
+- `internal/registry` implements registration, trust and the config cache.
+  `Inspect` returns the execution summary the user must approve; `Register`
+  takes an explicit trust decision. Trust is bound to the execution
+  fingerprint: renaming a display name or retuning a health interval keeps a
+  project trusted, while changing command, args, cwd, shell, env, env_file,
+  runtime or compose target raises `PROJECT_UNTRUSTED` and blocks starting.
+- Configuration is re-read only when mtime or size changes, so edits take
+  effect immediately without a reload command and status calls stay cheap.
+- Project ids are derived from the project path, so re-registering a directory
+  keeps its logs and history.
+
 ## Next
 
-- M4 project registry on SQLite
 - M5 port manager
 - M6 health, dependencies, restart policy
 - M7 daemon API and events
 - M8 CLI
+
 
 
