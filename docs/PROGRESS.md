@@ -103,12 +103,38 @@ clean; the same integration tests run on all three platforms in CI.
 - Project ids are derived from the project path, so re-registering a directory
   keeps its logs and history.
 
+## M5 — Port manager — done
+
+`internal/portmgr` is the only component allowed to choose a port; every start
+goes through `ReserveService`. There is no `findFreePort` helper anywhere else,
+because that pattern is exactly how concurrent starts end up sharing a port.
+
+- Allocation checks the registry *and* the OS, then claims the port with an
+  INSERT that the partial unique index adjudicates. Ten services requesting
+  auto ports concurrently receive ten distinct ports.
+- Two projects that both prefer 3000 get 3000 and 3001 with no config edits.
+- A fixed port is never silently moved: `value: 8000` in use fails with
+  `PORT_CONFLICT`, flagged `fixed`, enriched with the holding PID and process
+  name where the platform can resolve it.
+- A multi-port service is all-or-nothing; a failure on the second port releases
+  the first, so no half-allocated service leaks ports.
+- Availability probing binds IPv4 loopback *and* IPv4 wildcard, since a service
+  bound to only one of them would look free to a probe of the other. IPv6 is
+  consulted only when this machine can actually listen on IPv6.
+- `Verify` marks ports BOUND when a listener appears and UNVERIFIED when the
+  service ignored its injected `PORT`. An unverified port never kills the
+  process; health checking is what decides whether it matters.
+- Owner lookup is best effort by design: Windows reads the TCP table via
+  `GetExtendedTcpTable`, Linux matches `/proc/net/tcp` inodes to process fds,
+  macOS shells out to `lsof` when present. An unknown owner is a warning, never
+  a blocked start.
+
 ## Next
 
-- M5 port manager
 - M6 health, dependencies, restart policy
 - M7 daemon API and events
 - M8 CLI
+
 
 
 
