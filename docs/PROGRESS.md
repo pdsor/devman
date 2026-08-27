@@ -355,9 +355,44 @@ also got its own port window, since `go test ./...` runs packages concurrently
 against separate databases and two suites sharing the default range would be
 handed the same free port.
 
+## M11 — Codex / agent skill — done
+
+`skills/devman/` is the skill an agent loads instead of learning DevMan by trial
+and error. It is documentation, not code: the CLI already exposes everything, so
+the skill's job is to make an agent use it correctly.
+
+- `SKILL.md` leads with the rule the whole product exists for: never run a
+  long-lived dev command in your own shell. It then gives the decision procedure
+  (`devman status --json` first, branch on the error code), the onboarding
+  sequence, how to read a failure, and the full command list.
+- The `--trust` flag is documented as what it is: approval recorded on the user's
+  behalf. The skill instructs the agent to let the *user* answer the interactive
+  prompt when there is one, because a `devman.yaml` is executable code.
+- `references/schema.md` is the field reference including the rules the validator
+  enforces, so a generated config is right the first time.
+- `references/detection-rules.md` says to read the repository before writing
+  anything, and to prefer a documented command over an inferred one. It covers
+  Node package-manager detection from the lockfile, Python venv/Poetry/uv
+  invocation, Go's flag-instead-of-env habit, monorepos and compose services.
+- `references/examples.md` carries complete configurations, including the honest
+  limitation that one service's auto-allocated port is not visible in another
+  service's template, so cross-service URLs need a fixed port.
+- `references/errors.md` maps every code to the action it implies, and contrasts
+  BLOCKED (prerequisite missing, nothing attempted) with FAILED and CRASHED.
+- `scripts/devman-check.ps1` and `scripts/devman-check.sh` answer "is DevMan
+  here, is there a config, is it valid, is it registered, is it running" as one
+  JSON object with a `next_action`. The script deliberately starts nothing: a
+  check that launches a daemon as a side effect is a surprise.
+
+Verified against a real Node project end to end: the check script reports `init`
+with no config, `query_status` with a valid config and no daemon, and
+`register` → `start` → `nothing` as the documented flow proceeds, with the
+service reaching RUNNING/HEALTHY on an auto-allocated port.
+
 ## Next
 
-- M9 GUI, M10 Codex skill, M11 packaging, M12 CI (deferred by decision)
+- M9/M10 GUI: Tauri 2 desktop shell with the full page set
+- M12 packaging and CI
 - Python/FastAPI fixtures before V0.1 ships
 
 
