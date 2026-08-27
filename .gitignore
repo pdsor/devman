@@ -1,0 +1,28 @@
+# Go build artefacts
+/bin/
+/dist/
+devman
+devman.exe
+*.test
+*.exe
+*.out
+
+# DevMan local state (never commit)
+.devman-home/
+*.db
+*.db-shm
+*.db-wal
+auth-token
+daemon.json
+
+# Node / Tauri
+node_modules/
+apps/desktop/dist/
+apps/desktop/src-tauri/target/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
