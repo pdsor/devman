@@ -22,12 +22,12 @@ const RangeGeneral = "general"
 
 // Settings is the whole config.yaml document.
 type Settings struct {
-	Daemon      DaemonSettings        `yaml:"daemon" json:"daemon"`
-	PortRanges  map[string]PortRange  `yaml:"port_ranges" json:"port_ranges"`
-	Logs        LogSettings           `yaml:"logs" json:"logs"`
-	Defaults    DefaultSettings       `yaml:"defaults" json:"defaults"`
-	Environment EnvironmentSettings   `yaml:"environment" json:"environment"`
-	Startup     StartupSettings       `yaml:"startup" json:"startup"`
+	Daemon      DaemonSettings       `yaml:"daemon" json:"daemon"`
+	PortRanges  map[string]PortRange `yaml:"port_ranges" json:"port_ranges"`
+	Logs        LogSettings          `yaml:"logs" json:"logs"`
+	Defaults    DefaultSettings      `yaml:"defaults" json:"defaults"`
+	Environment EnvironmentSettings  `yaml:"environment" json:"environment"`
+	Startup     StartupSettings      `yaml:"startup" json:"startup"`
 }
 
 // DaemonSettings controls the local API listener.

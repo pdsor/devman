@@ -56,12 +56,34 @@ process is force-killed, and stopping a service kills a grandchild that
 deliberately outlives its parent. Linux and macOS currently compile and vet
 clean; the same integration tests run on all three platforms in CI.
 
+## M3 — Log capture and status model — done
+
+- `internal/logstore` turns raw output into structured records (seq, timestamp,
+  project, service, stream, message). Records are appended as NDJSON so a
+  restarted daemon can serve full-fidelity history, not just text.
+- `LineWriter` splits streams into lines, handles CRLF and partial writes, and
+  flushes bounded chunks when a service never emits a newline.
+- Per-service ring buffer (2000 records) is warmed from disk on open, so
+  history and live subscription need no file read per request. Sequence numbers
+  continue across daemon restarts.
+- Rotation is 10 MB with 5 backups by default; `History` transparently reads
+  across rotated files when a caller asks for more than the ring holds.
+- SSE subscribers get a buffered channel; a subscriber that stops reading is
+  dropped records rather than being allowed to stall the service it watches.
+- `LastErrors` serves the "what just broke" query an agent makes after a failed
+  start.
+- `pkg/dto` defines the stable API/CLI contract up front: process status,
+  desired state, health, port allocation, project aggregate, process instance,
+  events and daemon discovery info. `ProcessStatus` and `HealthStatus` are
+  separate, and observability flags (`log_capture`, `adopted`) live outside the
+  status enum so it does not inflate.
+
 ## Next
 
-- M3 log capture and status
 - M4 project registry on SQLite
 - M5 port manager
 - M6 health, dependencies, restart policy
 - M7 daemon API and events
 - M8 CLI
+
 

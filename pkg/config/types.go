@@ -23,9 +23,9 @@ const SchemaVersion = 1
 type RuntimeKind string
 
 const (
-	RuntimeHost           RuntimeKind = "host"
-	RuntimeDockerCompose  RuntimeKind = "docker-compose"
-	RuntimeExternal       RuntimeKind = "external"
+	RuntimeHost          RuntimeKind = "host"
+	RuntimeDockerCompose RuntimeKind = "docker-compose"
+	RuntimeExternal      RuntimeKind = "external"
 )
 
 // HealthKind selects the health probe implementation.

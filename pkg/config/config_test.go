@@ -432,14 +432,14 @@ func TestTemplateExpansion(t *testing.T) {
 	}
 
 	cases := map[string]string{
-		"http://127.0.0.1:${PORT}/health":  "http://127.0.0.1:8012/health",
-		"${PORT:debug}":                    "5678",
-		"${PROJECT_DIR}/x":                 "/proj/x",
-		"${SERVICE_DIR}":                   "/proj/backend",
-		"${HOME}/.cache":                   "/home/dev/.cache",
-		"key=${ENV:OPENAI_API_KEY}":        "key=sk-test",
-		"literal $${PORT}":                 "literal ${PORT}",
-		"no vars":                          "no vars",
+		"http://127.0.0.1:${PORT}/health": "http://127.0.0.1:8012/health",
+		"${PORT:debug}":                   "5678",
+		"${PROJECT_DIR}/x":                "/proj/x",
+		"${SERVICE_DIR}":                  "/proj/backend",
+		"${HOME}/.cache":                  "/home/dev/.cache",
+		"key=${ENV:OPENAI_API_KEY}":       "key=sk-test",
+		"literal $${PORT}":                "literal ${PORT}",
+		"no vars":                         "no vars",
 	}
 	for input, want := range cases {
 		got, err := ctx.Expand(input)
