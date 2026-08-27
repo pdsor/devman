@@ -1,0 +1,118 @@
+# DevMan's integration tests start real processes, bind real ports and kill real
+# process trees, so they have to run on all three operating systems rather than
+# on Linux with the platform paths mocked out. Process supervision is exactly
+# where the platforms disagree.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          # Read the version from go.mod so the toolchain never drifts from what
+          # the module declares.
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The Python acceptance fixtures skip themselves when these are missing,
+      # and a suite that silently skips is a suite that stops protecting
+      # anything. DEVMAN_TEST_PYTHON pins them to this interpreter.
+      - name: Install the Python fixture dependencies
+        run: python -m pip install --disable-pip-version-check fastapi uvicorn
+
+      - name: Verify the module is tidy
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - run: go vet ./...
+
+      - name: Build the CLI
+        run: go build ./cmd/devman
+
+      # -count=1 defeats the test cache: these tests assert on process and port
+      # state, and a cached PASS from a different machine state proves nothing.
+      - name: Test
+        env:
+          DEVMAN_TEST_PYTHON: python
+        run: go test -count=1 ./...
+
+  dist:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # dist stamps the version from `git describe`, which needs tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Proves every release target still compiles before a tag is cut, not
+      # after. Cross-compilation is free here only because the SQLite driver is
+      # pure Go.
+      - run: go run ./tools/build dist
+
+  desktop:
+    name: desktop shell
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      # `pnpm build` is `tsc --noEmit && vite build`. The type check is not a
+      # formality here: the message catalogue is typed so that a missing
+      # translation is a compile error.
+      - name: Type-check and bundle the frontend
+        working-directory: apps/desktop
+        run: corepack pnpm build
+
+      # cargo check rather than a full bundle: the installer is the release
+      # workflow's job, and Windows is the one runner that needs no extra system
+      # libraries to compile the shell.
+      - name: Check the Rust shell
+        working-directory: apps/desktop/src-tauri
+        run: cargo check --locked

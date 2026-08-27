@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.devman.desktop",
   "build": {
-    "beforeDevCommand": "corepack pnpm dev",
+    "beforeDevCommand": "go run ../../tools/build sidecar && corepack pnpm dev",
     "devUrl": "http://127.0.0.1:5273",
-    "beforeBuildCommand": "corepack pnpm build",
+    "beforeBuildCommand": "go run ../../tools/build sidecar && corepack pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -29,6 +29,7 @@
     "targets": ["nsis"],
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/icon.ico"],
     "shortDescription": "Local development runtime manager",
-    "longDescription": "DevMan owns the lifecycle of a project's development services so terminals and AI agents never have to."
+    "longDescription": "DevMan owns the lifecycle of a project's development services so terminals and AI agents never have to.",
+    "externalBin": ["binaries/devman"]
   }
 }

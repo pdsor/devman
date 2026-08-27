@@ -481,10 +481,87 @@ patched, so `2 天 3 小时` and `2d 3h` are the same code path.
 
 Verified with `tsc --noEmit`, `vite build` and a release `tauri build`.
 
+## M12 — packaging and CI — done
+
+Release tooling lives in `tools/build` and is written in Go, not as a Makefile
+or a shell script. The reason is the same reason DevMan itself is a single
+CGO-free binary: the tool that cuts a release should not need anything the
+project does not already need. `go run ./tools/build dist` behaves identically
+on Windows, macOS and Linux, so a release built on a laptop and a release built
+by a runner go through the same code rather than through two dialects of the
+same script.
+
+Three targets: `version` prints what would be stamped, `dist` cross-compiles the
+CLI for six targets (windows, darwin and linux × amd64 and arm64), archives each
+one with the README and writes a `sha256sum -c` compatible `SHA256SUMS`, and
+`sidecar` builds the CLI for the host and names it after the Rust target triple.
+
+Versioning finally connects: `cmd/devman/main.go` has always documented
+`-ldflags -X main.Version=…`, and nothing was passing it. The tool takes
+`DEVMAN_VERSION` when CI sets it from the tag, otherwise `git describe`, and it
+keeps the `-dirty` suffix on purpose — a binary built from uncommitted work
+should not impersonate a tag. Verified end to end: the binary extracted from
+`devman_…_windows_amd64.zip` reports that version through `devman --json
+version`.
+
+The installed desktop app now carries its own daemon. `tauri.conf.json` declares
+`externalBin: ["binaries/devman"]`, and the sidecar target runs from
+`beforeBuildCommand` and `beforeDevCommand`, so it is impossible to build a
+bundle without one. This closes a real gap: `devman_executable()` in the shell
+looks for a binary next to the application before falling back to `PATH`, and
+that branch was unreachable — while a GUI launched from the Start menu or the
+Dock is exactly the case where `PATH` cannot be trusted.
+
+`.github/workflows/ci.yml` runs `go vet`, a tidiness check, the build and
+`go test -count=1 ./...` on Linux, macOS and Windows, because process
+supervision is where the platforms disagree and mocking the platform away would
+test nothing. `-count=1` is deliberate: these tests assert on live process and
+port state, and a cached PASS from another machine's state proves nothing. A
+second job cross-compiles every release target so a broken target is found
+before a tag is cut, and a third type-checks the frontend, bundles it and
+`cargo check`s the Rust shell.
+
+`.github/workflows/release.yml` fires on a `v*` tag: one job produces the CLI
+archives and checksums, one produces the Windows installer with the sidecar
+inside, and a third publishes them with `gh release create` — preinstalled on
+the runners, so no third-party action needs write access to the repository.
+macOS and Linux ship the CLI only for V0.1; bundling those desktop targets
+means signing and notarisation, which is a decision about identity rather than
+a build step.
+
+## Python/FastAPI acceptance fixtures — done
+
+The existing suites use the test binary as their service, which keeps them
+hermetic but also keeps them Go-shaped. `internal/acceptance/python_test.go`
+covers the three ways a Python service actually differs:
+
+- Uvicorn and Django do not read `PORT`. The port must arrive as a command line
+  argument, so the fixture declares its port with **no** `env:` key and passes
+  `--port ${PORT}` in `args`. A `BOUND` port is then proof that template
+  expansion reached the argument list, not just the environment.
+- CPython block-buffers stdout when it is a pipe. The fixture prints its startup
+  line without an explicit flush and relies on `PYTHONUNBUFFERED: "1"` from
+  `devman.yaml`; if the env layer did not reach the process the line would sit
+  in a buffer for as long as the service runs, and the assertion would time out.
+- Stopping the service goes through the interpreter's signal handling rather
+  than Go's runtime, including `SIGBREAK` on Windows.
+
+`TestPythonService` needs only a stdlib interpreter. `TestFastAPIService` runs
+the configuration from the documentation against real FastAPI and Uvicorn and
+also asserts that Uvicorn's banner — which it writes to stderr — is captured.
+It skips rather than installing anything: a test that reaches the network to
+pass fails for reasons that have nothing to do with DevMan. CI installs the two
+packages explicitly and points the suite at that interpreter with
+`DEVMAN_TEST_PYTHON`, so the fixture runs on all three platforms instead of
+quietly skipping.
+
+Verified locally against FastAPI 0.141.1 and Uvicorn 0.52.4 in a throwaway
+virtual environment, and `go test -count=1 ./...` is green with it included.
+
 ## Next
 
-- M12 packaging and CI
-- Python/FastAPI fixtures before V0.1 ships
+- V0.1 release candidate: tag, then verify the installer on a clean machine
+- macOS and Linux desktop bundles once signing identities exist
 
 
 

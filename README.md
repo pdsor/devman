@@ -37,7 +37,10 @@ internal/            daemon internals (process, port, health, log, storage, api)
 pkg/config/          canonical devman.yaml schema, parser, validator
 pkg/errs/            shared error codes used by the API, the CLI and the skill
 schemas/             devman.schema.json for editor autocomplete
+apps/desktop/        Tauri 2 desktop shell (React + TypeScript)
+tools/build/         release tooling: cross-compilation, archives, sidecar
 ```
+
 
 ## Configuration
 
@@ -105,6 +108,37 @@ Point your editor at the JSON schema for completion:
 - Go 1.27+
 - Node 20+ and pnpm (desktop GUI)
 - Rust stable (Tauri 2 desktop shell)
+
+## Building
+
+```bash
+go build ./cmd/devman              # the CLI and daemon
+go test ./...                      # unit and acceptance suites
+go run ./tools/build dist          # every platform, archived, with SHA256SUMS
+```
+
+`tools/build` is Go rather than a Makefile so the same code produces a release
+on a laptop and in CI. It stamps the version from `git describe`, or from
+`DEVMAN_VERSION` when it is set, and `devman version` reports it back.
+
+The desktop app bundles its own copy of the CLI: `go run ./tools/build sidecar`
+runs automatically before every `pnpm tauri dev` and `pnpm tauri build`, and the
+bundled binary lands next to the installed application — which is where the
+window looks for it before falling back to `PATH`. A GUI launched from the Start
+menu or the Dock often has a `PATH` that never saw your shell profile.
+
+```bash
+cd apps/desktop
+corepack pnpm install
+corepack pnpm tauri build          # NSIS installer on Windows
+```
+
+Releases are cut by pushing a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+
+Two of the acceptance fixtures run a real Python service. They skip themselves
+when no interpreter is available; `DEVMAN_TEST_PYTHON` points them at a specific
+one, which is how the FastAPI fixture is run against a virtual environment.
+
 
 ## Data directory
 

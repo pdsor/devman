@@ -1,0 +1,150 @@
+# Cutting a release means pushing a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+#
+# The CLI archives and the Windows installer are produced by two different jobs
+# because they need different machines, but both stamp the same version — the
+# tag — through DEVMAN_VERSION.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to build (without the leading v)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  cli:
+    name: CLI archives
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Python fixture dependencies
+        run: python -m pip install --disable-pip-version-check fastapi uvicorn
+
+      - name: Resolve the version
+        id: version
+        shell: bash
+        # The input goes through the environment rather than through ${{ }}
+        # interpolation, which would splice whatever was typed straight into the
+        # shell.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "value=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A release must not ship code that does not pass its own tests, even
+      # though CI already ran them on the commit: the tag is what users install.
+      - env:
+          DEVMAN_TEST_PYTHON: python
+        run: go test -count=1 ./...
+
+      - name: Build every platform
+        env:
+          DEVMAN_VERSION: ${{ steps.version.outputs.value }}
+        run: go run ./tools/build dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli
+          path: dist/*
+
+  installer:
+    name: Windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Resolve the version
+        id: version
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$INPUT_VERSION" ]; then
+            echo "value=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The installer must carry its own daemon. Without this the app falls back
+      # to PATH, and a GUI started from the Start menu often has a PATH that
+      # never saw the user's shell profile.
+      - name: Build the bundled CLI
+        env:
+          DEVMAN_VERSION: ${{ steps.version.outputs.value }}
+        run: go run ./tools/build sidecar
+
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: |
+          corepack enable
+          corepack pnpm install --frozen-lockfile
+
+      - name: Build the installer
+        working-directory: apps/desktop
+        run: corepack pnpm tauri build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
+
+  publish:
+    name: Publish
+    needs: [cli, installer]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # gh is preinstalled on the runners, so publishing needs no third-party
+      # action with write access to the repository.
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "DevMan ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            artifacts/cli/* artifacts/installer/*
