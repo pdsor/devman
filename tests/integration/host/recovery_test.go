@@ -73,7 +73,6 @@ func TestDaemonDeathLeavesAnHonestState(t *testing.T) {
 	// CI log: it is the difference between adoption and honest crash reporting.
 	t.Logf("after the daemon died, pid %d survived: %v", pid, survived)
 
-
 	second := testenv.NewStack(t, layout, window)
 	result, err := second.Supervisor().Reconcile()
 	if err != nil {

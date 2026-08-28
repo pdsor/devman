@@ -22,16 +22,16 @@ jobs:
     name: CLI archives
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -59,12 +59,24 @@ jobs:
           DEVMAN_TEST_PYTHON: python
         run: go test -count=1 ./...
 
+      # The runtime gates run again on the tag for the same reason: what CI
+      # proved about a commit says nothing about what a tag ships if the two ever
+      # drift.
+      - name: Host runtime gates
+        run: go test -count=1 -tags=integration -timeout 20m ./tests/integration/host/
+
+      - name: Compose runtime gates
+        env:
+          DEVMAN_REQUIRE_DOCKER: "1"
+        run: go test -count=1 -tags=integration -timeout 25m ./tests/integration/compose/
+
+
       - name: Build every platform
         env:
           DEVMAN_VERSION: ${{ steps.version.outputs.value }}
         run: go run ./tools/build dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: cli
           path: dist/*
@@ -73,16 +85,16 @@ jobs:
     name: Windows installer
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -122,7 +134,7 @@ jobs:
         working-directory: apps/desktop
         run: corepack pnpm tauri build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: installer
           path: apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe
@@ -133,7 +145,7 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v6
         with:
           path: artifacts
 

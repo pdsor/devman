@@ -384,7 +384,8 @@ func (c *Config) checkComposeService(result *ValidationResult, path, file string
 }
 
 // lookPath resolves a command, also accepting a path relative to cwd.
-func lookPath(command, cwd string) (string, error) {	if strings.ContainsAny(command, `/\`) {
+func lookPath(command, cwd string) (string, error) {
+	if strings.ContainsAny(command, `/\`) {
 		candidate := command
 		if !filepath.IsAbs(candidate) {
 			candidate = filepath.Join(cwd, candidate)

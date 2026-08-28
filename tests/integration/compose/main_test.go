@@ -183,8 +183,6 @@ func repoRoot() (string, error) {
 	}
 }
 
-
-
 // project is one compose fixture on disk plus the compose project name DevMan
 // will use, so the test can address exactly the same containers DevMan does.
 type project struct {
@@ -378,4 +376,3 @@ func (p *project) startedAt(service string) time.Time {
 	}
 	return parsed
 }
-

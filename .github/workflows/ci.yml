@@ -1,7 +1,10 @@
-# DevMan's integration tests start real processes, bind real ports and kill real
-# process trees, so they have to run on all three operating systems rather than
-# on Linux with the platform paths mocked out. Process supervision is exactly
-# where the platforms disagree.
+# CI is DevMan's evidence, not its formality: the runtime's job is to own real
+# processes, real ports and real containers, so the pipeline has to run real
+# processes, real ports and real containers on every platform we ship.
+#
+# The jobs are split by what a failure would tell you — lint, unit,
+# integration-host, integration-compose, desktop, package — so a red X names the
+# problem before anyone opens the log.
 name: CI
 
 on:
@@ -18,39 +21,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  go:
-    name: go / ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
-          # Read the version from go.mod so the toolchain never drifts from what
-          # the module declares.
+          # go.mod is the single source of truth for the toolchain: pinning a
+          # version here as well is how CI and the module quietly diverge.
           go-version-file: go.mod
           cache: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      # The Python acceptance fixtures skip themselves when these are missing,
-      # and a suite that silently skips is a suite that stops protecting
-      # anything. DEVMAN_TEST_PYTHON pins them to this interpreter.
-      - name: Install the Python fixture dependencies
-        run: python -m pip install --disable-pip-version-check fastapi uvicorn
 
       - name: Verify the module is tidy
         run: |
           go mod tidy
           git diff --exit-code -- go.mod go.sum
 
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:"
+            echo "$unformatted"
+            exit 1
+          fi
+
       - run: go vet ./...
+
+      # The integration suites are behind a build tag, so the default vet never
+      # sees them. A test that only compiles when someone remembers the tag is a
+      # test that rots.
+      - run: go vet -tags=integration ./...
+
+  unit:
+    name: unit / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The Python acceptance fixtures skip themselves when these are missing,
+      # and a suite that silently skips is a suite that stops protecting
+      # anything. DEVMAN_TEST_PYTHON pins them to this interpreter, which on
+      # Windows also avoids the Microsoft Store `python3` stub.
+      - name: Install the Python fixture dependencies
+        run: python -m pip install --disable-pip-version-check fastapi uvicorn
 
       - name: Build the CLI
         run: go build ./cmd/devman
@@ -62,32 +93,64 @@ jobs:
           DEVMAN_TEST_PYTHON: python
         run: go test -count=1 ./...
 
-  dist:
-    name: cross-compile
-    runs-on: ubuntu-latest
+  integration-host:
+    name: integration-host / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-        with:
-          # dist stamps the version from `git describe`, which needs tags.
-          fetch-depth: 0
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
-      # Proves every release target still compiles before a tag is cut, not
-      # after. Cross-compilation is free here only because the SQLite driver is
-      # pure Go.
-      - run: go run ./tools/build dist
+      # Process-tree termination, the port race and daemon crash recovery are
+      # the three things the operating system owns rather than DevMan, so this
+      # job is blocking on all three platforms. It needs no Docker and no
+      # language runtime.
+      - name: Host runtime gates
+        run: go test -count=1 -tags=integration -timeout 20m -v ./tests/integration/host/
+
+  integration-compose:
+    name: integration-compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Recorded on purpose: when a compose test fails, the first question is
+      # always which engine and which compose implementation produced it.
+      - name: Record the Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      # DEVMAN_REQUIRE_DOCKER turns the suite's local skip into a failure. A
+      # skipped Docker gate is not a passing Docker gate, and this is the only
+      # job in the matrix that can prove the compose runtime works at all.
+      - name: Compose runtime gates
+        env:
+          DEVMAN_REQUIRE_DOCKER: "1"
+        run: go test -count=1 -tags=integration -timeout 25m -v ./tests/integration/compose/
 
   desktop:
-    name: desktop shell
+    name: desktop
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
 
@@ -116,3 +179,31 @@ jobs:
       - name: Check the Rust shell
         working-directory: apps/desktop/src-tauri
         run: cargo check --locked
+
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # dist stamps the version from `git describe`, which needs tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Every release target must still cross-compile before a tag is cut, not
+      # after. This is free only because the SQLite driver is pure Go.
+      - run: go run ./tools/build dist
+
+      # Uploaded from main as well: a "does the archive layout still look right"
+      # question should be answerable without cutting a release.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: dist-dev
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7

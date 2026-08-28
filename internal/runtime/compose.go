@@ -189,7 +189,7 @@ func classifyUpFailure(docker string, req StartRequest, target, output string, c
 	if strings.Contains(lower, "no such service") || strings.Contains(lower, "no service selected") {
 		return errs.New(errs.CodeConfigInvalid,
 			"the compose file has no service named %q", target).
-			At("services." + req.Service + ".compose.service").
+			At("services."+req.Service+".compose.service").
 			With("service", req.Service).
 			With("output", excerpt(output))
 	}

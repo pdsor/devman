@@ -395,4 +395,3 @@ func TestCrashRecovery(t *testing.T) {
 		return strings.Contains(stdout.String(), "listening on")
 	})
 }
-
