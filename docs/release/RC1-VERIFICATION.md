@@ -5,15 +5,11 @@ versions. It is not a checklist of intentions: a gate that has not run on the
 platform it claims to cover is written down as NOT VERIFIED, because "全部通过"
 with no runner behind it is worse than an honest gap.
 
-- Commit under verification: `39bfe4c` (CI run, all ten jobs green)
+- Commit under verification: `4c17faf` (CI run 33159386171, all ten jobs green)
 - Tag: none yet (`git tag` is empty; `v0.1.0-rc.1` is not cut)
 - Remote: `git@github.com:pdsor/devman.git`, branch `main`
 - Last updated: 2026-08-28
 
-> Three commits have landed since the CI evidence below was taken — `5ed2838`,
-> `49a7ad2` and `de966b7`, described under "Changes after the CI run". Their
-> local evidence is recorded there; the three-platform runner evidence in this
-> document still refers to `39bfe4c` and must be re-taken before the tag.
 
 
 ## Release gate status
@@ -35,8 +31,9 @@ never run, and neither can be signed off from this machine.
 
 ### Three-platform CI evidence
 
-Repository `pdsor/devman`, workflow `CI`, run on `39bfe4c`. Job results read
-back with `gh run view --json jobs`:
+Repository `pdsor/devman`, workflow `CI`, run 33159386171 on `4c17faf`. Job
+results read back with `gh run view --json jobs`:
+
 
 ```
 success  lint
@@ -253,11 +250,13 @@ DevMan, and are recorded because the diagnosis is the useful part:
 
 
 
-## Changes after the CI run
+## Changes after `39bfe4c`
 
-Three commits landed after `39bfe4c`. Two are bug fixes; one adds resource
-reporting, which the user asked for explicitly and which is therefore a scoped
-exception to the freeze rather than a silent addition.
+Three commits landed after `39bfe4c` and are covered by the CI run above, which
+was taken on `4c17faf`. Two are bug fixes; one adds resource reporting, which the
+user asked for explicitly and which is therefore a scoped exception to the freeze
+rather than a silent addition.
+
 
 - `5ed2838` — three desktop defects. `Summarise` counted services nobody asked
   to run, so a project with an optional worker, or one service deliberately
@@ -304,9 +303,8 @@ Run on the same Windows machine as the rest of this document, 2026-08-28:
 
 ### What these three commits still owe
 
-- Three-platform CI has not been re-run. Every PASS in the gate table above was
-  earned by `39bfe4c`.
 - The opener scope fix is reasoned from the generated
+
   `apps/desktop/src-tauri/gen/schemas/desktop-schema.json`, which documents the
   permission as scopeless and defines `OpenerScopeEntry` with a `url` field
   taking glob wildcards. No one has clicked a service URL in a rebuilt window
@@ -329,10 +327,8 @@ Run on the same Windows machine as the rest of this document, 2026-08-28:
   a tiny fixture exe, start/health/logs/stop, then uninstall removing app,
   binaries and shortcuts while leaving user data intact.
 - P0 — Gate 7: tag `v0.1.0-rc.1`, release workflow runs, artifacts attached.
-- P0 — re-run three-platform CI on `de966b7`. The gate table's PASS marks belong
-  to `39bfe4c`; three commits have landed since, one of which adds OS-specific
-  code on all three platforms.
 - P1 — click a service URL in a rebuilt desktop window and confirm a browser
+
   opens, which is the only thing that turns the opener-scope fix in `5ed2838`
   from argued into observed.
 - P1 — look at the sidebar CPU/memory meter, the project total and the
