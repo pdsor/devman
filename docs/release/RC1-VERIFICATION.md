@@ -10,6 +10,12 @@ with no runner behind it is worse than an honest gap.
 - Remote: `git@github.com:pdsor/devman.git`, branch `main`
 - Last updated: 2026-08-28
 
+> Three commits have landed since the CI evidence below was taken — `5ed2838`,
+> `49a7ad2` and `de966b7`, described under "Changes after the CI run". Their
+> local evidence is recorded there; the three-platform runner evidence in this
+> document still refers to `39bfe4c` and must be re-taken before the tag.
+
+
 ## Release gate status
 
 - Gate 1 — `go test -count=1 ./...` on three platforms: PASS — windows-latest,
@@ -247,7 +253,75 @@ DevMan, and are recorded because the diagnosis is the useful part:
 
 
 
+## Changes after the CI run
+
+Three commits landed after `39bfe4c`. Two are bug fixes; one adds resource
+reporting, which the user asked for explicitly and which is therefore a scoped
+exception to the freeze rather than a silent addition.
+
+- `5ed2838` — three desktop defects. `Summarise` counted services nobody asked
+  to run, so a project with an optional worker, or one service deliberately
+  stopped, reported DEGRADED while sitting in the state that was requested. The
+  project card had a redundant Open button next to Start and Stop. A service URL
+  was a button calling the opener plugin, but `opener:allow-open-url` grants the
+  command "without any pre-configured scope", so every call was denied and the
+  `void` discarded the rejection: the button looked dead.
+- `49a7ad2` — `internal/platform` gained the read-only half: cumulative CPU time
+  and resident memory for a process tree, and host CPU and memory. No
+  percentages, because a percentage describes an interval and belongs to
+  whichever layer holds two samples.
+- `de966b7` — a 1 Hz sampler in the supervisor, `GET /api/v1/machine/usage`,
+  per-service and per-project usage in the API, and the desktop's sidebar meter,
+  project total and per-service figure.
+
+### Local evidence for these three commits
+
+Run on the same Windows machine as the rest of this document, 2026-08-28:
+
+- `go test ./...` — all packages ok, no failures.
+- `go vet ./...` under `GOOS=windows`, `GOOS=linux` and `GOOS=darwin` — clean,
+  which is what covers the two platform files that cannot run here.
+- `gofmt -l internal pkg` — no output.
+- `pnpm build` in `apps/desktop` (`tsc --noEmit && vite build`) — exit 0.
+- `internal/supervisor/summarise_test.go` — 6 subtests. Optional worker stopped
+  → HEALTHY; `N/A` health → HEALTHY; a wanted service that crashed → DEGRADED;
+  an UNHEALTHY probe → DEGRADED; everything stopped → STOPPED; a service that
+  crashed while stopping → HEALTHY.
+- `internal/supervisor/usage_test.go` — the percentage arithmetic against
+  counters chosen on purpose: 0.5s of CPU in a 4-core second is 12.5%; 512 MB of
+  16 GiB is 3.125%; a machine 0.8s busy out of 4s of elapsed CPU time is 20%; a
+  tree that loses a process mid-interval reports 0% rather than negative work; a
+  stopped service is forgotten instead of freezing at its last reading.
+- `internal/platform/usage_test.go` — measures the test binary itself after a
+  busy loop, so a sampler returning nothing for a process that provably ran
+  fails on whichever platform it is run on. Also walks a deliberately cyclic
+  parent table, which two reads of a changing machine can produce.
+- `internal/acceptance/usage_test.go` — a real service under a real daemon, read
+  back over the API the desktop uses: usage appears with a plausible memory
+  share, the project total is at least its only service's, the service cannot
+  hold more memory than the machine reports in use, the reading disappears when
+  the service is stopped, and a never-started service has none. 2.06s, PASS.
+
+### What these three commits still owe
+
+- Three-platform CI has not been re-run. Every PASS in the gate table above was
+  earned by `39bfe4c`.
+- The opener scope fix is reasoned from the generated
+  `apps/desktop/src-tauri/gen/schemas/desktop-schema.json`, which documents the
+  permission as scopeless and defines `OpenerScopeEntry` with a `url` field
+  taking glob wildcards. No one has clicked a service URL in a rebuilt window
+  yet, so the fix is argued, not observed.
+- The sidebar meter, the project total and the per-service figure have not been
+  seen rendered. The window open on this machine runs an older build.
+- macOS host CPU is the sum of per-process CPU time, which is the only
+  machine-wide counter reachable without CGO. It omits kernel time not billed to
+  a process and can move backwards when processes exit; the sampler clamps a
+  negative delta to zero. This is a stated limitation in the code, not a defect
+  to fix under the freeze.
+
+
 ## Open items, classified
+
 
 - P0 — Gate 6: Windows installer smoke test on a clean machine with no Go, Node,
   pnpm, Rust, Python or Git: install, Start-menu entry, GUI starts, bundled
@@ -255,6 +329,16 @@ DevMan, and are recorded because the diagnosis is the useful part:
   a tiny fixture exe, start/health/logs/stop, then uninstall removing app,
   binaries and shortcuts while leaving user data intact.
 - P0 — Gate 7: tag `v0.1.0-rc.1`, release workflow runs, artifacts attached.
+- P0 — re-run three-platform CI on `de966b7`. The gate table's PASS marks belong
+  to `39bfe4c`; three commits have landed since, one of which adds OS-specific
+  code on all three platforms.
+- P1 — click a service URL in a rebuilt desktop window and confirm a browser
+  opens, which is the only thing that turns the opener-scope fix in `5ed2838`
+  from argued into observed.
+- P1 — look at the sidebar CPU/memory meter, the project total and the
+  per-service figure in a rebuilt window. The numbers are covered by tests; the
+  rendering is not.
+
 - P1 — upgrade smoke test: old build installed, new installer over it, database,
   config and registry preserved.
 - P1 — visual QA of the nine GUI pages in Chinese and English at 100/125/150%
@@ -275,12 +359,14 @@ DevMan, and are recorded because the diagnosis is the useful part:
 
 ## Blockers
 
-None outstanding. The remote exists, CI is green on all three platforms, and the
-compose suite runs on Linux with `DEVMAN_REQUIRE_DOCKER=1`. What is left is work
-that has not been done yet rather than work that cannot be done: an installer to
-exercise on a clean machine, a GUI pass, and a tag to cut.
+None outstanding. The remote exists, CI is green on all three platforms for
+`39bfe4c`, and the compose suite runs on Linux with `DEVMAN_REQUIRE_DOCKER=1`.
+What is left is work that has not been done yet rather than work that cannot be
+done: a CI re-run on the current head, an installer to exercise on a clean
+machine, a GUI pass, and a tag to cut.
 
 Gates 6 and 7 cannot be signed off from this machine's evidence, so
 `v0.1.0-rc.1` is not cut.
+
 
 
