@@ -98,6 +98,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET "+base+"/settings", s.handleSettingsGet)
 	mux.HandleFunc("PUT "+base+"/settings", s.handleSettingsSet)
 	mux.HandleFunc("GET "+base+"/tools", s.handleTools)
+	mux.HandleFunc("GET "+base+"/machine/usage", s.handleMachineUsage)
 
 	mux.HandleFunc("GET "+base+"/projects", s.handleProjectList)
 	mux.HandleFunc("POST "+base+"/projects", s.handleProjectRegister)
@@ -367,6 +368,7 @@ func (s *Server) projectDTO(record storage.ProjectRecord, withServices bool) dto
 	summary, status := supervisor.Summarise(services)
 	out.Summary = summary
 	out.Status = status
+	out.Usage = supervisor.SumUsage(services)
 	if withServices {
 		out.Services = services
 	}

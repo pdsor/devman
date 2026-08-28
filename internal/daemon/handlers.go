@@ -443,6 +443,13 @@ func (s *Server) handleServiceList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.opts.Supervisor.ProjectServices(id, cfg))
 }
 
+// handleMachineUsage reports host CPU and memory. It is a separate endpoint from
+// project status because the sidebar shows it on every page, including ones that
+// have no project loaded at all.
+func (s *Server) handleMachineUsage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.opts.Supervisor.MachineUsage())
+}
+
 func (s *Server) handleServiceGet(w http.ResponseWriter, r *http.Request) {
 	status, err := s.opts.Supervisor.ServiceStatus(r.PathValue("id"), r.PathValue("name"))
 	if err != nil {

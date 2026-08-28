@@ -148,8 +148,50 @@ textarea {
   color: var(--faint);
 }
 
-.rail-foot {
+/* The machine meter takes over pushing the footer down, so the footer no longer
+   claims the remaining space itself. */
+.rail-meter {
   margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 6px;
+}
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meter-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.meter-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--rule);
+  overflow: hidden;
+}
+
+.meter-fill {
+  height: 100%;
+  background: var(--accent);
+  /* The value changes every second; easing keeps the sidebar from flickering. */
+  transition: width 240ms linear;
+}
+
+.meter-detail {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.rail-foot {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -159,6 +201,7 @@ textarea {
   font-size: 11px;
   color: var(--faint);
 }
+
 
 .main {
   display: flex;

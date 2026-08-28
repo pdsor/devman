@@ -98,6 +98,40 @@ type Observability struct {
 	Adopted bool `json:"adopted"`
 }
 
+// Usage is what a service is costing right now, measured over the sampler's
+// last interval and covering the whole process tree, not just the pid DevMan
+// spawned.
+//
+// It is always a pointer on the containing struct: a service DevMan cannot
+// measure — a compose or external runtime with no host pid, or one that has not
+// been sampled yet — has no usage at all, which is a different statement from
+// "using nothing".
+type Usage struct {
+	// CPUPercent is share of the whole machine, so 100 means every core is
+	// busy with this service. That matches what the reading is compared
+	// against: the machine figure next to it.
+	CPUPercent float64 `json:"cpu_percent"`
+	// MemoryBytes is resident memory summed across the tree.
+	MemoryBytes uint64 `json:"memory_bytes"`
+	// MemoryPercent is that memory as a share of physical RAM.
+	MemoryPercent float64 `json:"memory_percent"`
+	// Procs is how many processes were measured. A service whose tree has
+	// grown to eight processes is worth seeing.
+	Procs     int       `json:"procs"`
+	SampledAt time.Time `json:"sampled_at"`
+}
+
+// MachineUsage is host-wide load, refreshed on the same tick as service usage
+// so the two are directly comparable.
+type MachineUsage struct {
+	CPUPercent       float64   `json:"cpu_percent"`
+	Cores            int       `json:"cores"`
+	MemoryUsedBytes  uint64    `json:"memory_used_bytes"`
+	MemoryTotalBytes uint64    `json:"memory_total_bytes"`
+	MemoryPercent    float64   `json:"memory_percent"`
+	SampledAt        time.Time `json:"sampled_at"`
+}
+
 // Project is a registered project.
 type Project struct {
 	ID          string        `json:"id"`
@@ -115,6 +149,9 @@ type Project struct {
 
 	Services []Service      `json:"services,omitempty"`
 	Summary  ProjectSummary `json:"summary"`
+	// Usage totals the services that are actually running, so a project card
+	// can show what the project as a whole is costing.
+	Usage *Usage `json:"usage,omitempty"`
 
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -152,6 +189,8 @@ type Service struct {
 	URL           string           `json:"url,omitempty"`
 	DependsOn     []string         `json:"depends_on,omitempty"`
 	Observability Observability    `json:"observability"`
+	// Usage is absent for a service with no measurable host process tree.
+	Usage *Usage `json:"usage,omitempty"`
 
 	// Message explains a BLOCKED or FAILED status in one line.
 	Message string `json:"message,omitempty"`

@@ -3,7 +3,7 @@
 
 import { useFeed, useFeedSignal } from "../feed";
 import { useAction, useResource } from "../hooks";
-import { projectLabel, projectStatusHint, projectTone } from "../format";
+import { projectLabel, projectStatusHint, projectTone, usageLabel } from "../format";
 import { useT } from "../i18n";
 import { useNav } from "../nav";
 import { Button, Chip, Empty, Notice, Page, Panel, Strip } from "../ui";
@@ -91,7 +91,9 @@ export function ProjectsPage() {
               {project.summary.failed > 0 ? (
                 <span className="t-bad">{t("projects.failed", { count: project.summary.failed })}</span>
               ) : null}
+              {project.usage ? <span className="faint">{usageLabel(project.usage)}</span> : null}
             </div>
+
 
             {project.config_error ? (
               <div className="mono t-bad">

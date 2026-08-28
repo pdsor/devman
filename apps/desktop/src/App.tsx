@@ -18,7 +18,7 @@ import {
 } from "./api/bridge";
 import { FeedContext } from "./feed";
 import { useEventFeed, useResource } from "./hooks";
-import { uptime } from "./format";
+import { memory, percent, uptime } from "./format";
 import { describeFailure, useT } from "./i18n";
 import { NavContext, type Route } from "./nav";
 import { ConfigPage } from "./pages/ConfigEditor";
@@ -144,12 +144,15 @@ function Workspace(props: { endpoint: Endpoint; onDisconnect: () => void }) {
               />
             </div>
 
+            <MachineMeter />
+
             <div className="rail-foot">
               <span>
                 {props.endpoint.host}:{props.endpoint.port}
               </span>
               <span>api {props.endpoint.api_version}</span>
             </div>
+
           </nav>
 
           <div className="main">
@@ -210,6 +213,56 @@ function Screen(props: { route: Route }) {
     case "settings":
       return <SettingsPage />;
   }
+}
+
+/**
+ * MachineMeter shows what the whole machine is doing, once a second.
+ *
+ * It sits above the endpoint footer because it answers the question that makes a
+ * developer open DevMan in the first place: is this box out of headroom, and is
+ * it my services doing it. The daemon samples on its own 1 Hz tick, so polling
+ * here only fetches the latest reading rather than driving the measurement.
+ */
+function MachineMeter() {
+  const t = useT();
+  const machine = useResource((api) => api.machineUsage(), "machine", 1000);
+  const data = machine.data;
+  // Before the first sample there is nothing honest to draw.
+  if (!data || data.memory_total_bytes === 0) return null;
+  return (
+    <div className="rail-meter">
+      <Meter label={t("machine.cpu")} value={percent(data.cpu_percent)} fill={data.cpu_percent} />
+      <Meter
+        label={t("machine.memory")}
+        value={percent(data.memory_percent)}
+        fill={data.memory_percent}
+        detail={`${memory(data.memory_used_bytes)} / ${memory(data.memory_total_bytes)}`}
+      />
+    </div>
+  );
+}
+
+function Meter(props: { label: string; value: string; fill: number; detail?: string }) {
+  const width = Math.max(0, Math.min(100, props.fill));
+  return (
+    <div className="meter">
+      <div className="meter-head">
+        <span>{props.label}</span>
+        <span className="mono">{props.value}</span>
+      </div>
+      <div
+        className="meter-track"
+        role="meter"
+        aria-label={props.label}
+        aria-valuenow={Math.round(width)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+      >
+        <div className="meter-fill" style={{ width: `${width}%` }} />
+      </div>
+      {props.detail ? <span className="meter-detail mono">{props.detail}</span> : null}
+    </div>
+  );
 }
 
 function NavItem(props: { label: string; active: boolean; onClick: () => void }) {

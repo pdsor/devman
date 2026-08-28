@@ -10,6 +10,7 @@ import type {
   DaemonEvent,
   DaemonStatus,
   LogRecord,
+  MachineUsage,
   OperationResult,
   Paths,
   PortAllocation,
@@ -117,6 +118,13 @@ export class Api {
   tools(): Promise<ToolResolution[]> {
     return this.request("GET", "/tools");
   }
+
+  // Host load. Separate from project status because the sidebar shows it on
+  // every page, including ones with no project loaded.
+  machineUsage(): Promise<MachineUsage> {
+    return this.request("GET", "/machine/usage");
+  }
+
 
   projects(withServices = false): Promise<Project[]> {
     return this.request("GET", withServices ? "/projects?services=true" : "/projects");

@@ -62,6 +62,10 @@ type Supervisor struct {
 
 	mu       sync.Mutex
 	services map[string]*service
+
+	// usage samples what the running services cost. It is owned here because
+	// only the supervisor knows which pids are currently services.
+	usage *usageSampler
 }
 
 // New creates a supervisor. Call Close to shut down monitoring goroutines;
@@ -75,13 +79,49 @@ func New(deps Deps) *Supervisor {
 		deps.Runtimes = runtime.NewSet()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Supervisor{
+	s := &Supervisor{
 		deps:     deps,
 		ctx:      ctx,
 		cancel:   cancel,
 		services: map[string]*service{},
+		usage:    newUsageSampler(hostSource{}),
 	}
+	// Resource sampling is tied to the supervisor's context, so Close stops it
+	// the same way it stops health monitoring.
+	go s.usage.run(ctx, s.usageRoots)
+	return s
 }
+
+// usageRoots is the pid of every service the sampler should measure. A service
+// with no host process — compose, external, or simply stopped — has no tree and
+// is left out, which is what makes its usage absent rather than zero.
+func (s *Supervisor) usageRoots() map[string]int {
+	s.mu.Lock()
+	list := make([]*service, 0, len(s.services))
+	keys := make([]string, 0, len(s.services))
+	for key, sv := range s.services {
+		list = append(list, sv)
+		keys = append(keys, key)
+	}
+	s.mu.Unlock()
+
+	roots := make(map[string]int, len(list))
+	for i, sv := range list {
+		sv.mu.Lock()
+		handle := sv.handle
+		sv.mu.Unlock()
+		if handle == nil || !handle.Running() {
+			continue
+		}
+		if pid := handle.PID(); pid > 0 {
+			roots[keys[i]] = pid
+		}
+	}
+	return roots
+}
+
+// MachineUsage is the last whole-machine reading.
+func (s *Supervisor) MachineUsage() dto.MachineUsage { return s.usage.machineUsage() }
 
 // Close stops health monitoring and pending restart timers.
 //

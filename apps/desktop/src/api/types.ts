@@ -49,6 +49,27 @@ export interface ProjectSummary {
   failed: number;
 }
 
+// Absent rather than zeroed when DevMan cannot measure something: a compose or
+// external service has no host process tree, which is not the same as one that
+// is using nothing.
+export interface Usage {
+  cpu_percent: number;
+  memory_bytes: number;
+  memory_percent: number;
+  procs: number;
+  sampled_at: string;
+}
+
+export interface MachineUsage {
+  cpu_percent: number;
+  cores: number;
+  memory_used_bytes: number;
+  memory_total_bytes: number;
+  memory_percent: number;
+  sampled_at: string;
+}
+
+
 export interface Project {
   id: string;
   name: string;
@@ -61,6 +82,8 @@ export interface Project {
   config_error?: ApiErrorBody;
   services?: Service[];
   summary: ProjectSummary;
+  usage?: Usage;
+
   created_at: string;
   updated_at: string;
   last_started_at?: string;
@@ -118,9 +141,11 @@ export interface Service {
   url?: string;
   depends_on?: string[];
   observability: Observability;
+  usage?: Usage;
   message?: string;
   reason?: ApiErrorBody;
 }
+
 
 export interface OperationResult {
   project: string;

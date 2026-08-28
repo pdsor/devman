@@ -17,6 +17,7 @@ import {
   projectTone,
   serviceLabel,
   uptime,
+  usageLabel,
 } from "../format";
 import { useT, type Translate } from "../i18n";
 import { useNav } from "../nav";
@@ -151,6 +152,8 @@ export function ProjectPage(props: { id: string }) {
         <Facts>
           <Fact label={t("project.services")}>{t("project.servicesCount", { running, total: services.length })}</Fact>
           <Fact label={t("project.healthy")}>{data.summary.healthy}</Fact>
+          <Fact label={t("project.usage")}>{data.usage ? usageLabel(data.usage) : "—"}</Fact>
+
           <Fact label={t("project.trust")}>
             {data.trusted ? t("project.trustApproved") : t("project.trustNotApproved")}
           </Fact>
@@ -280,6 +283,8 @@ function ServiceRow(props: {
           {service.ports && service.ports.length > 0 ? (
             <span>{service.ports.map((port) => `${port.port} ${port.status.toLowerCase()}`).join(" · ")}</span>
           ) : null}
+          {service.usage ? <span>{t("svc.usage", { value: usageLabel(service.usage) })}</span> : null}
+
           {service.depends_on && service.depends_on.length > 0 ? (
             <span>{t("svc.after", { names: service.depends_on.join(", ") })}</span>
           ) : null}

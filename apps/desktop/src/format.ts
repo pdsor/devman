@@ -8,6 +8,7 @@ import type {
   ProjectStatus,
   Service,
   PortStatus,
+  Usage,
 } from "./api/types";
 import type { Translate } from "./i18n";
 import type { MessageKey } from "./i18n/messages";
@@ -123,6 +124,35 @@ export function serviceLabel(service: Service): string {
 export function projectLabel(name: string, displayName?: string): string {
   return displayName && displayName !== name ? displayName : name;
 }
+
+/**
+ * memory renders bytes at the precision a developer reads at a glance.
+ *
+ * A dev server's footprint is interesting in the hundreds of megabytes, so MB
+ * gets no decimal and GB gets one: "512 MB", "1.4 GB". Binary units, matching
+ * what the OS task manager shows next to it.
+ */
+export function memory(bytes: number | undefined): string {
+  if (!bytes || bytes < 0) return "—";
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return "<1 MB";
+  if (mb < 1024) return `${Math.round(mb)} MB`;
+  return `${(mb / 1024).toFixed(1)} GB`;
+}
+
+/** percent keeps one decimal below 10% so a nearly idle service is not just 0. */
+export function percent(value: number | undefined): string {
+  if (value === undefined || value < 0) return "—";
+  if (value > 0 && value < 10) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
+}
+
+/** usageLabel is the one-line "12% · 512 MB" a service row shows. */
+export function usageLabel(usage: Usage | undefined): string {
+  if (!usage) return "";
+  return `${percent(usage.cpu_percent)} · ${memory(usage.memory_bytes)}`;
+}
+
 
 /** captureWarning names the message explaining a service whose output DevMan can
  *  no longer see. The caller translates it. */

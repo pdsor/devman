@@ -294,6 +294,7 @@ func (s *Supervisor) serviceDTO(sv *service, spec *config.Service) dto.Service {
 	if handle != nil {
 		out.PID = handle.PID()
 	}
+	out.Usage = s.usage.forService(serviceKey(sv.projectID, sv.name))
 	if !snapshot.startedAt.IsZero() && snapshot.actual == dto.StatusRunning {
 		started := snapshot.startedAt
 		out.StartedAt = &started
