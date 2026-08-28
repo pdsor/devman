@@ -5,16 +5,15 @@ versions. It is not a checklist of intentions: a gate that has not run on the
 platform it claims to cover is written down as NOT VERIFIED, because "全部通过"
 with no runner behind it is worse than an honest gap.
 
-- Commit under verification: `a2d2450` (CI run 4)
+- Commit under verification: `39bfe4c` (CI run, all ten jobs green)
 - Tag: none yet (`git tag` is empty; `v0.1.0-rc.1` is not cut)
 - Remote: `git@github.com:pdsor/devman.git`, branch `main`
 - Last updated: 2026-08-28
 
 ## Release gate status
 
-- Gate 1 — `go test -count=1 ./...` on three platforms: PARTIAL — PASS on
-  windows-latest and ubuntu-latest, FAIL on macos-latest (`TestPythonService`,
-  see Open items)
+- Gate 1 — `go test -count=1 ./...` on three platforms: PASS — windows-latest,
+  ubuntu-latest and macos-latest all green
 - Gate 2 — process tree fully terminated on three platforms: PASS —
   `integration-host` green on windows-latest, ubuntu-latest, macos-latest
 - Gate 3 — port race, 20 concurrent, no duplicates, on three platforms: PASS —
@@ -25,19 +24,19 @@ with no runner behind it is worse than an honest gap.
 - Gate 6 — Windows installer in a clean environment: NOT VERIFIED
 - Gate 7 — release workflow, tag to artifacts: NOT VERIFIED
 
-Four gates now have three-platform runner evidence. Gate 1 is one macOS test
-short of PASS; Gates 6 and 7 have never run.
+Five of seven gates have three-platform runner evidence. Gates 6 and 7 have
+never run, and neither can be signed off from this machine.
 
 ### Three-platform CI evidence
 
-Repository `pdsor/devman`, workflow `CI`, run on `a2d2450`. Job results read
+Repository `pdsor/devman`, workflow `CI`, run on `39bfe4c`. Job results read
 back with `gh run view --json jobs`:
 
 ```
 success  lint
 success  unit / ubuntu-latest
 success  unit / windows-latest
-failure  unit / macos-latest
+success  unit / macos-latest
 success  integration-host / ubuntu-latest
 success  integration-host / windows-latest
 success  integration-host / macos-latest
@@ -46,8 +45,12 @@ success  desktop
 success  package
 ```
 
-`integration-host / windows-latest` failed on the two previous runs and passes
-here; that transition is the evidence for the port fix below, not a rerun.
+Three earlier runs were red, and each transition is the evidence for one fix
+rather than a rerun: `integration-host / windows-latest` went green with
+`a2d2450` (port probe), `unit / macos-latest`'s identity test with `882bba1`
+(darwin executable path), and its python test with `39bfe4c` (the fixture's
+reverse-DNS hang).
+
 
 ### Windows end-to-end run, by hand
 
@@ -221,17 +224,31 @@ than DevMan:
    connecting, and reservation claims the database row before probing, so DevMan
    never probes a port it has already handed out (`a2d2450`). Found by making the
    test print the crashed racer's captured stderr instead of only its DTO.
+7. P1 — the Windows console keeps the system's legacy code page, so on a Chinese
+   install every non-ASCII byte DevMan writes — a service's own log lines
+   included — reached the terminal as mojibake. The CLI now switches the console
+   to UTF-8 for the duration of a command and restores the previous code page
+   (`0690b59`). Unverified; see Open items.
+
+Two more were diagnosed but turned out to be in the test fixture rather than in
+DevMan, and are recorded because the diagnosis is the useful part:
+
+- On macos-latest the python fixture hung inside its own constructor:
+  `HTTPServer.server_bind` calls `socket.getfqdn` on the bind address after
+  `bind()` and before `listen()`, and that reverse lookup blocks on a hosted
+  runner. The socket was bound but not listening, so connections timed out
+  rather than being refused. DevMan reported RUNNING (the process was alive),
+  the port UNVERIFIED (nothing had bound it) and health UNHEALTHY (nothing
+  answered) — three correct facts about a service that really was deaf
+  (`39bfe4c`).
+- The Tauri desktop job failed because `tauri_build` resolves `externalBin` at
+  compile time and the sidecar directory is gitignored, so only a machine that
+  had built it before could compile. The job builds the sidecar now (`55b8728`).
+
 
 
 ## Open items, classified
 
-- P1 — `unit / macos-latest`: `TestPythonService` fails with
-  `api health is UNHEALTHY (Get "http://127.0.0.1:8000/health": context
-  deadline exceeded)` at `python_test.go:164`. The service is RUNNING and start
-  reported no errors, so the process is alive and not answering. Undiagnosed:
-  the test prints the health message but not the service's captured output, and
-  the Windows port bug above was only located once the equivalent test printed
-  it. Next step is that diagnostic, not a guess.
 - P0 — Gate 6: Windows installer smoke test on a clean machine with no Go, Node,
   pnpm, Rust, Python or Git: install, Start-menu entry, GUI starts, bundled
   daemon starts, discovery file and auth token written, SQLite created, register
@@ -244,19 +261,26 @@ than DevMan:
   DPI. The fixture daemon (`tools/uifixture`, `VITE_DEVMAN_UI_TEST`) exists so
   this no longer depends on an unlocked screen; the pass itself has not been
   done.
+- P1 — the Windows console code page fix (`0690b59`) is unverified. It cannot be
+  checked from an automated shell: every command run here has stdout redirected,
+  and a redirected stdout is exactly the case the fix deliberately skips. It
+  needs one human running `devman logs` on a CP936 console against a service
+  that prints non-ASCII.
 - P2 — cross-service port interpolation (`${PORT:<service>.<name>}`) is
   rejected by the validator. Out of scope under the freeze; worth a documented
   limitation so nobody writes it expecting it to work.
 - P2 — macOS and Linux desktop bundles, and signing identities for all
   platforms.
 
+
 ## Blockers
 
-None outstanding. The remote exists, CI runs on all three platforms, and the
+None outstanding. The remote exists, CI is green on all three platforms, and the
 compose suite runs on Linux with `DEVMAN_REQUIRE_DOCKER=1`. What is left is work
-that has not been done yet rather than work that cannot be done: one macOS test
-to diagnose, an installer to exercise on a clean machine, and a tag to cut.
+that has not been done yet rather than work that cannot be done: an installer to
+exercise on a clean machine, a GUI pass, and a tag to cut.
 
-Gates 6 and 7 cannot be signed off from this machine's evidence, and Gate 1
-stays PARTIAL while macOS is red.
+Gates 6 and 7 cannot be signed off from this machine's evidence, so
+`v0.1.0-rc.1` is not cut.
+
 
