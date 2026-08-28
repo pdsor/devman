@@ -100,10 +100,11 @@ func Inspect(pid int) (ProcessInfo, error) {
 	if started, err := processStartTime(pid); err == nil {
 		info.StartedAt = started.UTC()
 	}
-	if link := procExePath(pid); link != "" {
-		if exe, err := os.Readlink(link); err == nil {
-			info.Executable = exe
-		}
+	// The platform file returns the resolved path, not a link to read: macOS has
+	// no /proc, so treating the answer as a symlink silently produced no
+	// executable at all there.
+	if exe := procExecutable(pid); exe != "" {
+		info.Executable = exe
 	}
 	if info.Executable == "" {
 		info.Name = processName(pid)

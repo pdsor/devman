@@ -22,7 +22,7 @@ import (
 // The argument area is readable for our own descendants, which is the only case
 // adoption cares about; for anything else this returns "" and the caller falls
 // back to the weaker comparison rather than refusing.
-func procExePath(pid int) string {
+func procExecutable(pid int) string {
 	raw, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil || len(raw) < 5 {
 		return ""

@@ -10,8 +10,15 @@ import (
 	"time"
 )
 
-func procExePath(pid int) string {
-	return fmt.Sprintf("/proc/%d/exe", pid)
+// procExecutable resolves the executable of a running process through
+// /proc/<pid>/exe. It returns "" when the link is unreadable, which is the
+// normal answer for a process owned by another user.
+func procExecutable(pid int) string {
+	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return ""
+	}
+	return exe
 }
 
 // processName falls back to /proc/<pid>/comm when the exe link is unreadable,
