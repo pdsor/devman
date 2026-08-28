@@ -19,6 +19,7 @@ import (
 const (
 	threadSuspendResume = 0x0002
 	swHide              = 0
+	utf8CodePage        = 65001
 )
 
 var (
@@ -26,6 +27,8 @@ var (
 	user32                 = windows.NewLazySystemDLL("user32.dll")
 	procAllocConsole       = kernel32.NewProc("AllocConsole")
 	procGetConsoleCP       = kernel32.NewProc("GetConsoleCP")
+	procGetConsoleOutputCP = kernel32.NewProc("GetConsoleOutputCP")
+	procSetConsoleOutputCP = kernel32.NewProc("SetConsoleOutputCP")
 	procGetConsoleWindow   = kernel32.NewProc("GetConsoleWindow")
 	procSetConsoleCtrlHdlr = kernel32.NewProc("SetConsoleCtrlHandler")
 	procShowWindow         = user32.NewProc("ShowWindow")
@@ -191,6 +194,33 @@ func (s *sysProcess) release() {
 
 // signalName has no Windows equivalent: processes report exit codes only.
 func signalName(*os.ProcessState) string { return "" }
+
+// UseUTF8Console makes the attached console read DevMan's output as UTF-8 and
+// returns the function that puts it back.
+//
+// DevMan writes UTF-8 everywhere, a service's own log lines included. A Windows
+// console defaults to the system's legacy code page — 936 on a Chinese install,
+// 932 on a Japanese one — which turns every multi-byte character into mojibake,
+// so `devman logs` becomes unreadable for exactly the users whose services print
+// non-ASCII. The previous code page is restored on the way out: the console
+// belongs to the user's shell and outlives this process.
+func UseUTF8Console() func() {
+	// Only when output really goes to the console. A redirected stdout carries
+	// raw UTF-8 bytes and the code page has no say in how they are decoded, so
+	// touching it would be a side effect on the user's shell for no gain.
+	var mode uint32
+	if err := windows.GetConsoleMode(windows.Handle(os.Stdout.Fd()), &mode); err != nil {
+		return func() {}
+	}
+	previous, _, _ := procGetConsoleOutputCP.Call()
+	if previous == 0 || previous == utf8CodePage {
+		return func() {}
+	}
+	if ret, _, _ := procSetConsoleOutputCP.Call(utf8CodePage); ret == 0 {
+		return func() {}
+	}
+	return func() { procSetConsoleOutputCP.Call(previous) }
+}
 
 // EnsureConsole guarantees the daemon has a console so that CTRL_BREAK can be
 // delivered to child process groups. A console allocated here is hidden

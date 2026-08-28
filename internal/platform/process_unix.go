@@ -77,6 +77,9 @@ func EnsureConsole() error { return nil }
 // HasConsole is always true on Unix: SIGTERM needs no console.
 func HasConsole() bool { return true }
 
+// UseUTF8Console has nothing to do on Unix: terminals there are UTF-8 already.
+func UseUTF8Console() func() { return func() {} }
+
 // Alive reports whether a PID currently exists.
 func Alive(pid int) bool {
 	if pid <= 0 {

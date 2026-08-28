@@ -10,11 +10,17 @@ import (
 	"os"
 
 	"github.com/devman-project/devman/internal/cli"
+	"github.com/devman-project/devman/internal/platform"
 )
 
 // Version is set at build time with -ldflags "-X main.Version=...".
 var Version = "0.1.0-dev"
 
 func main() {
-	os.Exit(cli.Main(Version, os.Args[1:]))
+	// The console is the user's, not ours: switch it to UTF-8 for the duration
+	// of the command and hand it back as it was found.
+	restore := platform.UseUTF8Console()
+	code := cli.Main(Version, os.Args[1:])
+	restore()
+	os.Exit(code)
 }
