@@ -136,6 +136,7 @@ services:
 const stdlibApp = `import argparse
 import http.server
 import signal
+import socketserver
 import sys
 
 parser = argparse.ArgumentParser()
@@ -154,6 +155,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # HTTPServer.server_bind resolves the bind address with socket.getfqdn,
+    # which blocks for tens of seconds on a hosted macOS runner. The socket is
+    # already bound but not yet listening while that happens, so connections are
+    # dropped rather than refused and the service looks alive but deaf. The
+    # resolved name is only ever used to fill in a Server header, so skip it.
+    def server_bind(self):
+        socketserver.TCPServer.server_bind(self)
+        self.server_name = "127.0.0.1"
+        self.server_port = self.server_address[1]
+
+
 def shutdown(*_args):
     sys.exit(0)
 
@@ -163,7 +176,7 @@ for name in ("SIGINT", "SIGTERM", "SIGBREAK"):
     if handled is not None:
         signal.signal(handled, shutdown)
 
-server = http.server.ThreadingHTTPServer(("127.0.0.1", options.port), Handler)
+server = Server(("127.0.0.1", options.port), Handler)
 print("python app listening on %d" % options.port)
 server.serve_forever()
 `
