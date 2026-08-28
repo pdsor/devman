@@ -1,6 +1,7 @@
 // Service dashboard: one project's services, with the state DevMan has for each
 // and the controls that change it.
 
+import { useState } from "react";
 import { useFeed, useFeedSignal } from "../feed";
 import { useAction, useResource, useTick } from "../hooks";
 import {
@@ -224,7 +225,20 @@ function ServiceRow(props: {
   onLogs: () => void;
 }) {
   const { service, t } = props;
+  const [openError, setOpenError] = useState("");
   const capture = captureWarning(service);
+  // A denied opener scope or a machine with no browser registered rejects
+  // silently otherwise, which looks exactly like a dead button.
+  const openURL = async () => {
+    if (!service.url) return;
+    setOpenError("");
+    try {
+      await openExternal(service.url);
+    } catch (error) {
+      setOpenError(t("svc.openFailed", { url: service.url, error: String(error) }));
+    }
+  };
+
   const stopped =
     service.status === "STOPPED" ||
     service.status === "FAILED" ||
@@ -273,11 +287,14 @@ function ServiceRow(props: {
 
         {service.url ? (
           <div className="svc-meta">
-            <button type="button" className="link mono" onClick={() => void openExternal(service.url ?? "")}>
+            <button type="button" className="link mono" onClick={openURL}>
               {service.url}
             </button>
           </div>
         ) : null}
+
+        {openError ? <div className="svc-meta t-bad">{openError}</div> : null}
+
 
         {service.command_line ? <div className="svc-meta faint">{service.command_line}</div> : null}
 

@@ -55,7 +55,21 @@ export function ProjectsPage() {
 
       <div className="cards">
         {(projects.data ?? []).map((project) => (
-          <article className="card" key={project.id}>
+          <article
+            className="card"
+            key={project.id}
+            role="button"
+            tabIndex={0}
+            aria-label={t("projects.open")}
+            onClick={() => navigate({ page: "project", id: project.id })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                navigate({ page: "project", id: project.id });
+              }
+            }}
+          >
+
             <div className="row">
               <h3>{projectLabel(project.name, project.display_name)}</h3>
               <div style={{ marginLeft: "auto" }}>
@@ -88,11 +102,11 @@ export function ProjectsPage() {
               <div className="mono t-blocked">{t("projects.untrusted")}</div>
             ) : null}
 
-            <div className="row wrap">
-              <Button small onClick={() => navigate({ page: "project", id: project.id })}>
-                {t("projects.open")}
-              </Button>
+            {/* The card itself navigates, so the buttons must not: a click on
+                Start should start, not also open the project. */}
+            <div className="row wrap" onClick={(event) => event.stopPropagation()}>
               <Button
+
                 small
                 variant="primary"
                 disabled={action.pending !== null || !project.trusted}

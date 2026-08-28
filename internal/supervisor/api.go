@@ -356,10 +356,20 @@ func (s *Supervisor) ProjectServices(projectID string, cfg *config.Config) []dto
 }
 
 // Summarise aggregates service states into the project headline.
+//
+// Services the user has not asked to run are left out of the verdict. A project
+// with an optional worker, or one service deliberately stopped, is not degraded:
+// it is in the state that was asked for. Total still counts every declared
+// service so a caller can show "1/2 running" and see that something is idle.
 func Summarise(services []dto.Service) (dto.ProjectSummary, dto.ProjectStatus) {
 	summary := dto.ProjectSummary{Total: len(services)}
+	wanted := 0
 	status := dto.ProjectStopped
 	for _, svc := range services {
+		if svc.DesiredState == dto.DesiredStopped {
+			continue
+		}
+		wanted++
 		switch svc.Status {
 		case dto.StatusRunning:
 			summary.Running++
@@ -375,13 +385,15 @@ func Summarise(services []dto.Service) (dto.ProjectSummary, dto.ProjectStatus) {
 	switch {
 	case summary.Total == 0:
 		status = dto.ProjectStopped
+	case wanted == 0:
+		status = dto.ProjectStopped
 	case summary.Failed > 0 && summary.Running == 0:
 		status = dto.ProjectFailed
 	case summary.Failed > 0:
 		status = dto.ProjectDegraded
 	case summary.Running == 0:
 		status = dto.ProjectStopped
-	case summary.Healthy == summary.Running && summary.Running == summary.Total:
+	case summary.Healthy == summary.Running && summary.Running == wanted:
 		status = dto.ProjectHealthy
 	case summary.Running > 0:
 		status = dto.ProjectDegraded

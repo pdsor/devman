@@ -142,6 +142,7 @@ export const zh = {
   "svc.stop": "停止",
   "svc.restart": "重启",
   "svc.logs": "日志",
+  "svc.openFailed": "无法在浏览器中打开 {url}：{error}",
   "svc.captureAdopted": "这个进程活过了守护进程重启，它的输出已经不再被捕获。重启该服务即可恢复日志。",
   "svc.captureLost": "输出捕获已断开。重启该服务即可恢复日志。",
 
@@ -464,6 +465,7 @@ export const en: Record<MessageKey, string> = {
   "svc.stop": "Stop",
   "svc.restart": "Restart",
   "svc.logs": "Logs",
+  "svc.openFailed": "Could not open {url} in a browser: {error}",
   "svc.captureAdopted":
     "This process survived a daemon restart, so its output is no longer captured. Restart the service to get logs back.",
   "svc.captureLost": "Output capture was lost. Restart the service to get logs back.",
