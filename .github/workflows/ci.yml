@@ -88,10 +88,22 @@ jobs:
 
       # -count=1 defeats the test cache: these tests assert on process and port
       # state, and a cached PASS from a different machine state proves nothing.
+      #
+      # The failure is echoed as a workflow annotation because raw job logs need
+      # repository admin rights to fetch, while annotations do not: without this
+      # a red X on a platform nobody has locally is just "exit code 1".
       - name: Test
+        shell: bash
         env:
           DEVMAN_TEST_PYTHON: python
-        run: go test -count=1 ./...
+        run: |
+          set -o pipefail
+          go test -count=1 ./... 2>&1 | tee test-output.txt || {
+            excerpt=$(tail -n 60 test-output.txt | awk '{ gsub(/%/, "%25"); printf "%s%%0A", $0 }')
+            echo "::error title=unit tests failed on ${{ matrix.os }}::$excerpt"
+            exit 1
+          }
+
 
   integration-host:
     name: integration-host / ${{ matrix.os }}
@@ -114,7 +126,15 @@ jobs:
       # job is blocking on all three platforms. It needs no Docker and no
       # language runtime.
       - name: Host runtime gates
-        run: go test -count=1 -tags=integration -timeout 20m -v ./tests/integration/host/
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -tags=integration -timeout 20m -v ./tests/integration/host/ 2>&1 | tee host-output.txt || {
+            excerpt=$(tail -n 80 host-output.txt | awk '{ gsub(/%/, "%25"); printf "%s%%0A", $0 }')
+            echo "::error title=host runtime gates failed on ${{ matrix.os }}::$excerpt"
+            exit 1
+          }
+
 
   integration-compose:
     name: integration-compose
@@ -139,9 +159,17 @@ jobs:
       # skipped Docker gate is not a passing Docker gate, and this is the only
       # job in the matrix that can prove the compose runtime works at all.
       - name: Compose runtime gates
+        shell: bash
         env:
           DEVMAN_REQUIRE_DOCKER: "1"
-        run: go test -count=1 -tags=integration -timeout 25m -v ./tests/integration/compose/
+        run: |
+          set -o pipefail
+          go test -count=1 -tags=integration -timeout 25m -v ./tests/integration/compose/ 2>&1 | tee compose-output.txt || {
+            excerpt=$(tail -n 80 compose-output.txt | awk '{ gsub(/%/, "%25"); printf "%s%%0A", $0 }')
+            echo "::error title=compose runtime gates failed::$excerpt"
+            exit 1
+          }
+
 
   desktop:
     name: desktop
@@ -160,7 +188,22 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
 
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # tauri.conf.json declares the daemon as an externalBin, and tauri_build
+      # resolves that path at compile time — so `cargo check` fails with
+      # "resource path binaries\devman-<triple>.exe doesn't exist" unless the
+      # sidecar has been built. The binaries directory is deliberately not
+      # committed, which is why this passed on a developer machine that happened
+      # to have built one and failed on a clean runner.
+      - name: Build the bundled CLI
+        run: go run ./tools/build sidecar
+
       - name: Install frontend dependencies
+
         working-directory: apps/desktop
         run: |
           corepack enable
