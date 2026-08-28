@@ -613,14 +613,71 @@ no gate is marked PASS. The four platform gates are PARTIAL — Windows only, on
 one machine — and compose-on-Linux, the installer smoke test and the release
 workflow are NOT VERIFIED.
 
+## Three platforms answered, and the desktop stopped lying
+
+CI on a remote closed the gap the section above admitted to. Five of the seven
+gates now have three-platform runner evidence, and getting there turned two
+"flaky" failures into located causes, because in both cases the test was made to
+print what the operating system thought rather than only what DevMan claimed.
+
+The Windows port race was a real DevMan defect and the more interesting of the
+two. Reserving a port probed the OS first and claimed the database row second, so
+twenty concurrent starts could all see the same port as free. Worse, the probe
+itself was a `net.Listen`, which on Windows is exclusive: probing a port can take
+it away from the child that was just told to listen there. The claim now goes to
+the database first — a unique partial index over active rows is the real
+arbiter — and the probe, whose only remaining job is to notice a listener DevMan
+does not manage, releases the row when it finds one. Bind verification asks by
+connecting instead of by binding.
+
+The macOS failure was not DevMan's. A Python fixture bound its socket and then
+called `socket.getfqdn` before `listen`, which blocks for tens of seconds on a
+hosted runner, so connections timed out instead of being refused: the service
+looked alive and was deaf. DevMan's three-way report — RUNNING, port UNVERIFIED,
+health UNHEALTHY — was correct, and that is recorded as a fixture fix rather than
+dressed up as a product one.
+
+Then four desktop complaints, all of them about the GUI stating something untrue.
+A project with an optional worker, or with one service deliberately stopped, read
+DEGRADED while sitting in exactly the state that was asked for; the verdict now
+ignores services whose desired state is STOPPED, so a manual stop is normal while
+a service that ran and then died still shows. The project card had an Open button
+next to Start and Stop, making navigation the only action that needed a target.
+And a service URL was a button that did nothing: `opener:allow-open-url` grants
+the Tauri command "without any pre-configured scope", so every call was denied,
+and the `void` in front of it swallowed the rejection.
+
+The fourth was resource reporting, which the user asked for explicitly and is
+recorded as a scoped exception to the freeze rather than slipped in. A service is
+measured as a process tree, not a pid, because `npm run dev` is a shell, a node
+launcher and a bundler; measuring only the child would understate most services
+by an order of magnitude. The platform layer hands out cumulative counters and
+nothing else, since a percentage describes an interval and belongs to whichever
+layer holds two samples — that layer is a 1 Hz sampler in the supervisor, which
+is also the only place that knows which pids are services. Usage is a pointer
+everywhere it appears: a compose service has no host tree and a just-started one
+has no second reading, and absent is a different statement from zero. For the
+same reason a stopped service loses its reading rather than freezing at the CPU
+it was using a moment before it died.
+
+macOS is the honest weak spot. Without CGO there is no reachable host CPU
+counter, so it sums per-process CPU time, which omits kernel time not billed to a
+process and can move backwards when processes exit. The sampler clamps the
+negative delta and the limitation is written where someone reading a percentage
+will find it.
+
 ## Next
 
-- Push to a remote and let CI run: four of the seven release gates have no
-  evidence because no runner has ever executed them
+- Re-run three-platform CI: every PASS in `RC1-VERIFICATION.md` was earned by
+  `39bfe4c`, and three commits have landed since
 - Windows installer smoke test on a clean machine, plus the upgrade case
-- `DEVMAN_UI_TEST=1` entry point so GUI screenshots stop depending on an unlocked
-  screen, then the visual pass over the nine pages in both languages
+- Click a service URL and look at the sidebar meter in a rebuilt window: both are
+  argued from a schema and covered by tests, neither has been observed
+- Verify the console code page fix on a real CP936 console — it cannot be checked
+  from a shell with redirected stdout, which is the case the fix skips
+- Tag `v0.1.0-rc.1` once gates 6 and 7 have evidence
 - macOS and Linux desktop bundles once signing identities exist
+
 
 
 
