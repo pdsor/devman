@@ -129,6 +129,42 @@ func binaryName(goos string) string {
 	return "devman"
 }
 
+// signingNote is the text shipped beside each binary.
+//
+// "No Apple signing identity" is not the same fact as "macOS is unsupported",
+// and the archives have to make that distinction for the user instead of leaving
+// them with an OS warning and no explanation. The checksums in SHA256SUMS are
+// what integrity rests on until there are certificates.
+func signingNote(goos string) string {
+	const shared = `This build is not code signed.
+
+Verify the download against SHA256SUMS in the same release before running it:
+that checksum, not a certificate, is the integrity guarantee for this build.
+
+`
+	switch goos {
+	case "darwin":
+		return shared + `macOS is supported; this artifact simply has no Apple Developer
+signature or notarisation yet, so Gatekeeper will refuse it on first run and may
+call it damaged. To run it anyway:
+
+    xattr -d com.apple.quarantine ./devman
+    ./devman version
+`
+	case "windows":
+		return shared + `Windows may show a SmartScreen "unrecognised app" prompt because the
+binary carries no Authenticode signature. Choose "More info" then "Run anyway",
+after checking the checksum.
+`
+	default:
+		return shared + `Make the binary executable if your archive tool dropped the bit:
+
+    chmod +x ./devman
+    ./devman version
+`
+	}
+}
+
 // buildCLI compiles cmd/devman for one platform.
 //
 // -trimpath keeps absolute build paths out of the binary so two machines
@@ -169,6 +205,15 @@ func dist(root string) error {
 			return fmt.Errorf("%s/%s: %w", p.goos, p.goarch, err)
 		}
 		if err := copyFile(filepath.Join(root, "README.md"), filepath.Join(stage, "README.md")); err != nil {
+			return err
+		}
+		// Every artifact this tool produces is unsigned, and the operating
+		// systems say so in ways that read like corruption ("damaged and can't
+		// be opened", SmartScreen). Shipping the explanation inside the archive
+		// is the difference between an unsigned build and a build users think is
+		// broken.
+		if err := os.WriteFile(filepath.Join(stage, "UNSIGNED.txt"),
+			[]byte(signingNote(p.goos)), 0o644); err != nil {
 			return err
 		}
 
