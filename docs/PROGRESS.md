@@ -558,9 +558,68 @@ quietly skipping.
 Verified locally against FastAPI 0.141.1 and Uvicorn 0.52.4 in a throwaway
 virtual environment, and `go test -count=1 ./...` is green with it included.
 
+## RC1 hardening — runtime evidence — partly done
+
+Feature freeze is on. Nothing here adds a capability; it proves the ones that
+exist, and three real defects fell out of doing so.
+
+`internal/testenv` now owns the definition of "a real DevMan" — storage,
+registry, ports, logs, events, supervisor, HTTP listener, plus the trick of using
+the test binary itself as the supervised service. The acceptance suites lost
+about 230 lines of duplicated setup and their assertions did not change, which is
+the only evidence that a harness refactor was a refactor. Each suite keeps its
+own daemon port window because `go test ./...` runs packages in parallel.
+
+`tests/integration/compose` asks Docker rather than DevMan: every claim is
+checked against `docker compose ps --format json` and `docker inspect`. That
+inversion is what found the defects. The log follower had been reading
+`logs -f --tail 0`, so everything a container printed before DevMan attached —
+including why an image fails to boot — was discarded. Every `docker compose up`
+failure was one internal error, so "Docker Desktop isn't running", "your service
+name is a typo" and "DevMan is broken" were indistinguishable and all landed in
+FAILED; there is now a `DOCKER_UNAVAILABLE` (BLOCKED, 422) decided by a
+`docker info` probe, and `CONFIG_INVALID` for an unknown service. And
+`compose.service` was never checked against the compose file, while validation
+resolved a relative `compose.file` against a different directory than the runtime
+did, so validation could pass on a file the runtime never opens.
+
+The suite is hermetic: the fixture image is `FROM scratch` over a static Go
+binary built locally, so a failure means DevMan is broken rather than that a
+registry was slow. `DEVMAN_REQUIRE_DOCKER=1` turns its local skip into a
+failure, because a skipped Docker gate is not a passing Docker gate.
+
+`tests/integration/host` covers what the operating system owns rather than
+DevMan: a three-level process tree that must be entirely gone after a stop with
+the port bindable again; twenty projects all preferring port 3000 started
+concurrently, which must yield twenty distinct bound ports and no stale
+reservations; and a daemon that dies without stopping its services. That last
+one is deliberately not asserted as "services always survive", because on Windows
+they live in the daemon's job object and die with it by design. The gate is that
+the next daemon's report matches reality — adopted and RUNNING with
+`log_capture: detached`, or CRASHED with ports released — and both branches are
+assertions rather than a skip.
+
+CI is split into lint / unit / integration-host / integration-compose / desktop /
+package so a red X names the problem. lint also runs
+`go vet -tags=integration ./...`, since a test that only compiles when someone
+remembers the tag is a test that rots. Action versions were audited rather than
+bumped by habit, and `setup-go@v7` reads the toolchain from `go.mod` so CI and
+the module cannot drift. Every archive now carries `UNSIGNED.txt`: macOS is
+supported, there is simply no Apple signing identity, and Gatekeeper reports that
+state as "damaged", which reads like a corrupt download.
+
+`docs/release/RC1-VERIFICATION.md` records where this stands without rounding up:
+no gate is marked PASS. The four platform gates are PARTIAL — Windows only, on
+one machine — and compose-on-Linux, the installer smoke test and the release
+workflow are NOT VERIFIED.
+
 ## Next
 
-- V0.1 release candidate: tag, then verify the installer on a clean machine
+- Push to a remote and let CI run: four of the seven release gates have no
+  evidence because no runner has ever executed them
+- Windows installer smoke test on a clean machine, plus the upgrade case
+- `DEVMAN_UI_TEST=1` entry point so GUI screenshots stop depending on an unlocked
+  screen, then the visual pass over the nine pages in both languages
 - macOS and Linux desktop bundles once signing identities exist
 
 
