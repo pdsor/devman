@@ -61,6 +61,12 @@ func canListen(network, address string) bool {
 	return true
 }
 
+// Listening answers by connecting rather than binding, so it is safe to ask
+// about a port a service is in the middle of taking.
+func (p *osProber) Listening(port int) bool {
+	return IsListening("127.0.0.1", port, 300*time.Millisecond)
+}
+
 // Owner delegates to the platform implementation. A nil result means "occupied
 // by something, but this platform cannot say what", which is a warning and
 // never a hard failure.

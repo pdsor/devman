@@ -27,6 +27,12 @@ import (
 type Prober interface {
 	// Available reports whether DevMan could bind the port right now.
 	Available(port int) bool
+	// Listening reports whether something accepts connections on the port.
+	//
+	// This is the only safe question to ask about a port DevMan has already
+	// handed to a service: it connects instead of binding, so it cannot take
+	// the port away from the process that was told to listen on it.
+	Listening(port int) bool
 	// Owner identifies the external process holding a port. It returns nil when
 	// the platform cannot tell, which must never block a start.
 	Owner(port int) *dto.PortOwner
@@ -201,6 +207,14 @@ func (m *Manager) reserveFromRange(
 }
 
 // tryReserve claims one specific port, checking both the registry and the OS.
+//
+// The database claim comes first on purpose. The OS probe works by binding the
+// port for an instant, and on Windows that bind is exclusive: probing a port
+// another service already owns would steal it from under a child process that
+// was told to listen on it, which is exactly how a service handed the preferred
+// port died with "Only one usage of each socket address" while twenty projects
+// scanned the same range. Claiming first means DevMan never probes a port that
+// is already accounted for.
 func (m *Manager) tryReserve(
 	projectID, service string, spec config.PortSpec, port int,
 ) (storage.PortRecord, error) {
@@ -208,13 +222,18 @@ func (m *Manager) tryReserve(
 		return storage.PortRecord{}, errs.New(errs.CodeConfigInvalid,
 			"port %d is out of range 1-65535", port)
 	}
+	record, err := m.db.ReservePort(port, projectID, service, spec.Name, spec.Env)
+	if err != nil {
+		return storage.PortRecord{}, err
+	}
+	// The probe still has to happen: it is the only protection against a
+	// listener DevMan does not manage. Losing it means giving the port back.
 	if !m.prober.Available(port) {
+		_ = m.db.ReleasePort(record.ID)
 		return storage.PortRecord{}, errs.New(errs.CodePortConflict,
 			"port %d is in use by another process", port)
 	}
-	// The insert is the actual claim; the OS probe above is only an optimisation
-	// plus protection against non-DevMan listeners.
-	return m.db.ReservePort(port, projectID, service, spec.Name, spec.Env)
+	return record, nil
 }
 
 // Verify checks whether the service actually bound the ports it was given and
@@ -230,7 +249,7 @@ func (m *Manager) Verify(projectID, service string) ([]storage.PortRecord, error
 	}
 	for i, record := range records {
 		state := storage.PortStateUnverified
-		if !m.prober.Available(record.Port) {
+		if m.prober.Listening(record.Port) {
 			// Something is listening; since we hold the reservation, it is ours.
 			state = storage.PortStateBound
 		}
@@ -266,7 +285,7 @@ func (m *Manager) Adopt(projectID, service, portName, envVar string, port int) (
 		return storage.PortRecord{}, err
 	}
 	state := storage.PortStateUnverified
-	if !m.prober.Available(port) {
+	if m.prober.Listening(port) {
 		state = storage.PortStateBound
 	}
 	if err := m.db.SetPortState(record.ID, state); err != nil {

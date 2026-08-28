@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/devman-project/devman/internal/testenv"
 	"github.com/devman-project/devman/pkg/dto"
 )
 
@@ -105,10 +106,10 @@ func TestConcurrentStartsNeverShareAPort(t *testing.T) {
 	owner := map[int]string{}
 	for i, got := range results {
 		if got.err != nil {
-			t.Fatalf("racer %d: %v", i, got.err)
+			t.Fatalf("racer %d: %v\ncaptured output:\n%s", i, got.err, serviceLog(t, s, got.root))
 		}
 		if got.status != dto.StatusRunning {
-			t.Fatalf("racer %d is %s", i, got.status)
+			t.Fatalf("racer %d is %s\ncaptured output:\n%s", i, got.status, serviceLog(t, s, got.root))
 		}
 		if got.port == 0 {
 			t.Fatalf("racer %d got no port", i)
@@ -156,4 +157,16 @@ func TestConcurrentStartsNeverShareAPort(t *testing.T) {
 		s.RunJSON(&remaining, "ports")
 		return len(remaining) == 0
 	})
+}
+
+// serviceLog returns what the fixture actually printed. A crashed racer reported
+// only as CRASHED with an empty port list says nothing about why it died; its
+// stderr says whether the bind was refused and by which error.
+func serviceLog(t *testing.T, s *testenv.Stack, root string) string {
+	t.Helper()
+	app, stdout, stderr := s.App(false)
+	if code := app.Run([]string{"logs", "--project", root, "--tail", "50", "web"}); code != 0 {
+		return fmt.Sprintf("(logs exited %d)\n%s%s", code, stdout.String(), stderr.String())
+	}
+	return stdout.String()
 }

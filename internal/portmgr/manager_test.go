@@ -42,6 +42,15 @@ func (p *fakeProber) Available(port int) bool {
 	return !p.bound[port]
 }
 
+func (p *fakeProber) Listening(port int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, taken := p.occupied[port]; taken {
+		return true
+	}
+	return p.bound[port]
+}
+
 func (p *fakeProber) Owner(port int) *dto.PortOwner {
 	p.mu.Lock()
 	defer p.mu.Unlock()
