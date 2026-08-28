@@ -5,24 +5,90 @@ versions. It is not a checklist of intentions: a gate that has not run on the
 platform it claims to cover is written down as NOT VERIFIED, because "全部通过"
 with no runner behind it is worse than an honest gap.
 
-- Commit under verification: `b1fc5f023ae2d0e4e928acdd8510738fdbd412a1`
+- Commit under verification: `a2d2450` (CI run 4)
 - Tag: none yet (`git tag` is empty; `v0.1.0-rc.1` is not cut)
-- Remote: none configured (`git remote -v` is empty) — see Blockers
+- Remote: `git@github.com:pdsor/devman.git`, branch `main`
 - Last updated: 2026-08-28
 
 ## Release gate status
 
-- Gate 1 — `go test -count=1 ./...` on three platforms: PARTIAL (Windows only)
-- Gate 2 — process tree fully terminated on three platforms: PARTIAL (Windows only)
-- Gate 3 — port race, 20 concurrent, no duplicates, on three platforms: PARTIAL (Windows only)
-- Gate 4 — daemon crash recovery on three platforms: PARTIAL (Windows only)
-- Gate 5 — Docker Compose suite on Linux CI: NOT VERIFIED (passes locally on Windows + Docker Desktop)
+- Gate 1 — `go test -count=1 ./...` on three platforms: PARTIAL — PASS on
+  windows-latest and ubuntu-latest, FAIL on macos-latest (`TestPythonService`,
+  see Open items)
+- Gate 2 — process tree fully terminated on three platforms: PASS —
+  `integration-host` green on windows-latest, ubuntu-latest, macos-latest
+- Gate 3 — port race, 20 concurrent, no duplicates, on three platforms: PASS —
+  same three runners, after the fix in `a2d2450`
+- Gate 4 — daemon crash recovery on three platforms: PASS — same three runners
+- Gate 5 — Docker Compose suite on Linux CI: PASS — `integration-compose` green
+  with `DEVMAN_REQUIRE_DOCKER=1`, so a skip would have failed the job
 - Gate 6 — Windows installer in a clean environment: NOT VERIFIED
 - Gate 7 — release workflow, tag to artifacts: NOT VERIFIED
 
-No gate is marked PASS. Four are blocked on the same missing resource.
+Four gates now have three-platform runner evidence. Gate 1 is one macOS test
+short of PASS; Gates 6 and 7 have never run.
+
+### Three-platform CI evidence
+
+Repository `pdsor/devman`, workflow `CI`, run on `a2d2450`. Job results read
+back with `gh run view --json jobs`:
+
+```
+success  lint
+success  unit / ubuntu-latest
+success  unit / windows-latest
+failure  unit / macos-latest
+success  integration-host / ubuntu-latest
+success  integration-host / windows-latest
+success  integration-host / macos-latest
+success  integration-compose
+success  desktop
+success  package
+```
+
+`integration-host / windows-latest` failed on the two previous runs and passes
+here; that transition is the evidence for the port fix below, not a rerun.
+
+### Windows end-to-end run, by hand
+
+Not a test binary: the real CLI, a project that did not exist before, both
+services written as ordinary apps.
+
+Machine: Windows 11 build 10.0.22631 x86_64, go1.27.0, Python 3.12.10,
+Node v24.19.0. Binary: `go build ./cmd/devman`, reported version `0.1.0-dev`.
+
+1. `devman-check.ps1` in an empty project → `next_action: init`,
+   `daemon_running: false`. Nothing was started by the check.
+2. `devman init .` scaffolded `devman.yaml`; it was replaced with two host
+   services — a Python API (`python server.py`, `preferred: 8000`, range
+   `backend`, http health probe) and a Node web app (`npm run dev` with
+   `platform.windows.command: npm.cmd`, `preferred: 3000`, range `frontend`,
+   `depends_on: api condition healthy`).
+3. `devman validate --json` rejected the first draft:
+   `CONFIG_INVALID … ${PORT:api.http} refers to an undeclared port name` at
+   `services.web.env.API_URL`. Cross-service port interpolation is not a v0.1
+   feature; the reference was removed and validation returned
+   `{"valid": true, "errors": [], "warnings": []}`.
+4. `devman register . --trust` → `trusted: true`, project id `p_fc61fb70dca9`.
+5. `devman start --json --wait 40s` → `api` RUNNING/HEALTHY on 8000 (BOUND),
+   `web` RUNNING on 3000. `web` has no health block, so health is `N/A`, which
+   is the honest answer rather than a fabricated probe.
+6. Verified against the OS, not against DevMan:
+   `GET http://127.0.0.1:8000/health` → `{"status": "ok"}`,
+   `GET http://127.0.0.1:3000/` → `{"service":"web","port":3000,...}`.
+   `devman ports` listed 3000 and 8000 BOUND to the right service.
+7. Port management under contention: a second project with the same preferred
+   ports was registered and started. It received 8001 and 3001, both BOUND,
+   both answering; the first project kept 8000 and 3000. No conflict was
+   reported to either caller and nothing was reassigned.
+8. `devman logs --project … web --tail 5` showed the npm banner and
+   `web listening on 3001`, so capture follows through `npm.cmd` into `node`.
+9. `devman stop` on both projects → `no ports allocated`,
+   `Get-NetTCPConnection` finds nothing listening on 3000, 3001, 8000 or 8001,
+   and status reports STOPPED. The `npm.cmd` → `node` tree left no survivor.
 
 ## Local verification run
+
 
 Machine: Windows 11, build 10.0.22631, x86_64. Toolchain: go1.27.0
 windows/amd64. Docker engine 28.3.2, Docker Compose v2.38.2-desktop.1, Linux
@@ -138,13 +204,34 @@ than DevMan:
    validation resolved a relative `compose.file` against the project root while
    the runtime resolves it against the service cwd, so validation could pass on
    a file the runtime never opens. Both fixed (`3119900`).
+4. P0 — `docker info` exits 0 on Docker CE 28.0.4 with an unreachable daemon
+   (Docker Desktop 28.3.2 exits non-zero), so the engine probe reported INTERNAL
+   instead of `DOCKER_UNAVAILABLE` on the Linux runner. Replaced with
+   `docker version --format {{.Server.Version}}`, a question only a server can
+   answer (`ff97b0f`).
+5. P1 — on macOS, `Inspect` passed the `kern.procargs2` result to `os.Readlink`,
+   so the executable was never recorded and the identity check that is supposed
+   to reject a recycled PID had nothing to compare. The platform hook now
+   returns a resolved path (`882bba1`).
+6. P0 — bind verification asked the OS "could I bind this port?" every 100ms for
+   up to fifteen seconds, on the very port a starting service had been told to
+   listen on. On Windows that probe is exclusive, so a child whose bind landed
+   inside a probe window died with "Only one usage of each socket address" — the
+   CRASHED racer in `integration-host / windows-latest`. Verification now asks by
+   connecting, and reservation claims the database row before probing, so DevMan
+   never probes a port it has already handed out (`a2d2450`). Found by making the
+   test print the crashed racer's captured stderr instead of only its DTO.
+
 
 ## Open items, classified
 
-- P0 — three-platform CI evidence for Gates 1–4. Code is in place
-  (`.github/workflows/ci.yml`, jobs `unit` and `integration-host` on
-  windows/ubuntu/macos-latest); no run exists because there is no remote.
-- P0 — Gate 5 on Linux CI (`integration-compose`, `DEVMAN_REQUIRE_DOCKER=1`).
+- P1 — `unit / macos-latest`: `TestPythonService` fails with
+  `api health is UNHEALTHY (Get "http://127.0.0.1:8000/health": context
+  deadline exceeded)` at `python_test.go:164`. The service is RUNNING and start
+  reported no errors, so the process is alive and not answering. Undiagnosed:
+  the test prints the health message but not the service's captured output, and
+  the Windows port bug above was only located once the equivalent test printed
+  it. Next step is that diagnostic, not a guess.
 - P0 — Gate 6: Windows installer smoke test on a clean machine with no Go, Node,
   pnpm, Rust, Python or Git: install, Start-menu entry, GUI starts, bundled
   daemon starts, discovery file and auth token written, SQLite created, register
@@ -153,20 +240,23 @@ than DevMan:
 - P0 — Gate 7: tag `v0.1.0-rc.1`, release workflow runs, artifacts attached.
 - P1 — upgrade smoke test: old build installed, new installer over it, database,
   config and registry preserved.
-- P1 — `DEVMAN_UI_TEST=1` entry point so GUI screenshots do not depend on an
-  unlocked screen, plus visual QA of the nine pages in Chinese and English at
-  100/125/150% DPI.
+- P1 — visual QA of the nine GUI pages in Chinese and English at 100/125/150%
+  DPI. The fixture daemon (`tools/uifixture`, `VITE_DEVMAN_UI_TEST`) exists so
+  this no longer depends on an unlocked screen; the pass itself has not been
+  done.
+- P2 — cross-service port interpolation (`${PORT:<service>.<name>}`) is
+  rejected by the validator. Out of scope under the freeze; worth a documented
+  limitation so nobody writes it expecting it to work.
 - P2 — macOS and Linux desktop bundles, and signing identities for all
   platforms.
 
 ## Blockers
 
-No remote repository. `git remote -v` is empty and the `gh` CLI is not installed
-on this machine, so the 6 hardening commits (`30f34fb`, `3119900`, `0d24af1`,
-`bf721ff`, `5010392`, `b1fc5f0`) on top of the earlier history cannot be pushed,
-CI has never executed on any runner, and the release workflow cannot be
-exercised. Four of the seven gates depend on this single step.
+None outstanding. The remote exists, CI runs on all three platforms, and the
+compose suite runs on Linux with `DEVMAN_REQUIRE_DOCKER=1`. What is left is work
+that has not been done yet rather than work that cannot be done: one macOS test
+to diagnose, an installer to exercise on a clean machine, and a tag to cut.
 
-Nothing here can be signed off as ACCEPTED until those runs exist and their
-runner names, versions and results replace the PARTIAL and NOT VERIFIED lines
-above.
+Gates 6 and 7 cannot be signed off from this machine's evidence, and Gate 1
+stays PARTIAL while macOS is red.
+
