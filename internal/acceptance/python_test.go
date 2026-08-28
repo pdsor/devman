@@ -1,6 +1,8 @@
 package acceptance
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +12,37 @@ import (
 	"time"
 
 	"github.com/devman-project/devman/internal/platform"
+	"github.com/devman-project/devman/internal/testenv"
 	"github.com/devman-project/devman/pkg/dto"
 )
+
+// explainUnhealthy turns "UNHEALTHY" into something a CI log can be debugged
+// from. A probe message alone cannot tell "the interpreter never listened" apart
+// from "something else owns that port", and on a hosted runner those have very
+// different answers, so ask both questions.
+func explainUnhealthy(t *testing.T, s *testenv.Stack, root string, service dto.Service) string {
+	t.Helper()
+	var report strings.Builder
+	app, stdout, stderr := s.App(false)
+	if code := app.Run([]string{"logs", service.Name, "--project", root, "--tail", "50"}); code != 0 {
+		fmt.Fprintf(&report, "logs exited %d: %s%s\n", code, stdout.String(), stderr.String())
+	} else {
+		fmt.Fprintf(&report, "captured output:\n%s", stdout.String())
+	}
+	for _, allocation := range service.Ports {
+		address := fmt.Sprintf("127.0.0.1:%d", allocation.Port)
+		conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+		if err != nil {
+			fmt.Fprintf(&report, "%s (%s): nothing accepted a connection: %v\n",
+				address, allocation.Status, err)
+			continue
+		}
+		conn.Close()
+		fmt.Fprintf(&report, "%s (%s): a connection was accepted, so something is listening there\n",
+			address, allocation.Status)
+	}
+	return report.String()
+}
 
 // The other suites use the test binary as their service, which keeps them
 // hermetic but also keeps them Go-shaped: the process reads PORT from the
@@ -161,7 +192,8 @@ func TestPythonService(t *testing.T) {
 		t.Fatalf("api is %s (%s)", api.Status, api.Message)
 	}
 	if api.Health.Status != dto.HealthHealthy {
-		t.Fatalf("api health is %s (%s)", api.Health.Status, api.Health.Message)
+		t.Fatalf("api health is %s (%s)\n%s",
+			api.Health.Status, api.Health.Message, explainUnhealthy(t, s, root, api))
 	}
 	if len(api.Ports) != 1 {
 		t.Fatalf("api has %d ports, want 1", len(api.Ports))
@@ -270,7 +302,8 @@ func TestFastAPIService(t *testing.T) {
 		t.Fatalf("api is %s (%s)", api.Status, api.Message)
 	}
 	if api.Health.Status != dto.HealthHealthy {
-		t.Fatalf("api health is %s (%s)", api.Health.Status, api.Health.Message)
+		t.Fatalf("api health is %s (%s)\n%s",
+			api.Health.Status, api.Health.Message, explainUnhealthy(t, s, root, api))
 	}
 	if len(api.Ports) != 1 || api.Ports[0].Status != dto.PortBound {
 		t.Fatalf("uvicorn did not bind the port DevMan assigned: %+v", api.Ports)
