@@ -197,16 +197,28 @@ func classifyUpFailure(docker string, req StartRequest, target, output string, c
 	return errs.From(cause).With("output", excerpt(output))
 }
 
-// engineReachable reports whether `docker info` succeeds with this service's
-// environment, which is what makes a DOCKER_HOST pointing at nothing detectable.
+// engineReachable reports whether this service's environment can reach a Docker
+// engine, which is what makes a DOCKER_HOST pointing at nothing detectable.
 func engineReachable(docker string, req StartRequest) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, docker, "info", "--format", "{{.ServerVersion}}")
+	// `docker info` cannot be the probe: with an unreachable daemon its exit code
+	// is not consistent between engines. Docker Desktop 28.3.2 exits non-zero,
+	// while Docker CE 28.0.4 exits zero and simply leaves the server section
+	// empty — which made every unreachable-engine failure look like an internal
+	// DevMan error on Linux, the one platform where that is most likely to
+	// happen. `docker version` is asked for a field only a live server can fill
+	// in, so an empty answer is as conclusive as a non-zero exit.
+	cmd := exec.CommandContext(ctx, docker, "version", "--format", "{{.Server.Version}}")
 	cmd.Dir = req.Dir
 	cmd.Env = req.Env
-	return cmd.Run() == nil
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	version := strings.TrimSpace(string(out))
+	return version != "" && version != "<no value>"
 }
 
 // excerpt trims captured output to something that fits in an error payload.
