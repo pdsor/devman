@@ -59,8 +59,33 @@ export function forgetManualEndpoint(): void {
   localStorage.removeItem(MANUAL_KEY);
 }
 
+/** fixtureEndpoint is the UI-review escape hatch.
+ *
+ *  With VITE_DEVMAN_UI_TEST set, the window connects straight to the fixture
+ *  daemon (`go run ./tools/uifixture`) instead of asking for an address and a
+ *  token. Screenshots and visual passes then depend on nothing but the build:
+ *  no registered project, no unlocked machine, no typing a token that scrolled
+ *  out of the terminal. */
+function fixtureEndpoint(): Endpoint | null {
+  if (!import.meta.env.VITE_DEVMAN_UI_TEST) return null;
+  const baseUrl = (import.meta.env.VITE_DEVMAN_UI_TEST_URL as string) || "http://127.0.0.1:39190/api/v1";
+  const token = (import.meta.env.VITE_DEVMAN_UI_TEST_TOKEN as string) || "devman-ui-test";
+  const url = new URL(baseUrl);
+  return {
+    base_url: baseUrl.replace(/\/+$/, ""),
+    token,
+    host: url.hostname,
+    port: Number(url.port || 80),
+    pid: 0,
+    version: "ui-fixture",
+    api_version: "v1",
+  };
+}
+
 /** resolveEndpoint finds a running daemon without starting one. */
 export async function resolveEndpoint(): Promise<Endpoint> {
+  const fixture = fixtureEndpoint();
+  if (fixture) return fixture;
   if (inTauri()) return invoke<Endpoint>("daemon_endpoint");
   const manual = manualEndpoint();
   if (manual) return manual;
@@ -68,6 +93,7 @@ export async function resolveEndpoint(): Promise<Endpoint> {
   // side that knows which language to say it in.
   throw new Error("NO_ENDPOINT");
 }
+
 
 /** startDaemon launches the daemon and waits for it to answer. */
 export async function startDaemon(): Promise<Endpoint> {
